@@ -55,6 +55,3 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
-
-# Local-only working docs (PRD, status tracking) - kept in private repo zymuk/VirusTotalNetv3-dev
-docs/
