@@ -117,7 +117,89 @@ public class FeedbackClientTests
         await Assert.ThrowsAsync<ArgumentException>(() => client.AddVoteAsync(VtObjectType.File, "id", ""));
         await Assert.ThrowsAsync<ArgumentException>(() => client.AddVoteAsync(VtObjectType.File, "id", "suspicious"));
         await Assert.ThrowsAsync<ArgumentException>(() => client.AddVoteAsync(VtObjectType.File, "id", "HARMLESS"));
+        await Assert.ThrowsAsync<ArgumentException>(() => client.GetCommentAsync(" "));
+        await Assert.ThrowsAsync<ArgumentException>(() => client.DeleteCommentAsync(""));
+        await Assert.ThrowsAsync<ArgumentException>(() => client.VoteCommentAsync("", CommentVoteKind.Positive));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => client.ListLatestCommentsAsync(limit: 0));
 
         Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task ListLatestComments_AppendsFilterLimitAndCursor()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                """{ "data": [ { "type": "comment", "id": "c1", "attributes": { "text": "x" } } ], "meta": { "count": 1 } }"""));
+
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new FeedbackClient(vt);
+
+        var page = await client.ListLatestCommentsAsync(filter: "attributes.date:2020-04-01T00:00:00Z", limit: 25, cursor: "n2");
+
+        Assert.Single(page.Items);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Get, request.Method);
+        Assert.Equal(
+            VirusTotalOptions.DefaultBaseAddress + "comments?filter=attributes.date%3A2020-04-01T00%3A00%3A00Z&limit=25&cursor=n2",
+            request.RequestUri!.AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task GetComment_RetrievesSingleComment()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                """{ "data": { "type": "comment", "id": "u-123", "attributes": { "text": "hi", "date": 1609459200 } } }"""));
+
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new FeedbackClient(vt);
+
+        var comment = await client.GetCommentAsync("u-123");
+
+        Assert.Equal("u-123", comment!.Id);
+        Assert.Equal("hi", comment.Attributes!.Text);
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Get, request.Method);
+        Assert.Equal(VirusTotalOptions.DefaultBaseAddress + "comments/u-123", request.RequestUri!.ToString());
+    }
+
+    [Fact]
+    public async Task DeleteComment_SendsDelete()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK, """{ }"""));
+
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new FeedbackClient(vt);
+
+        await client.DeleteCommentAsync("u-123");
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Delete, request.Method);
+        Assert.Equal(VirusTotalOptions.DefaultBaseAddress + "comments/u-123", request.RequestUri!.ToString());
+    }
+
+    [Theory]
+    [InlineData(CommentVoteKind.Positive, "\"positive\":1", "\"negative\":0", "\"abuse\":0")]
+    [InlineData(CommentVoteKind.Negative, "\"positive\":0", "\"negative\":1", "\"abuse\":0")]
+    [InlineData(CommentVoteKind.Abuse, "\"positive\":0", "\"negative\":0", "\"abuse\":1")]
+    public async Task VoteComment_PostsCounts(CommentVoteKind kind, string positive, string negative, string abuse)
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK, """{ }"""));
+
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new FeedbackClient(vt);
+
+        await client.VoteCommentAsync("u-123", kind);
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal(VirusTotalOptions.DefaultBaseAddress + "comments/u-123/vote", request.RequestUri!.ToString());
+        Assert.Contains(positive, handler.LastRequestBody!);
+        Assert.Contains(negative, handler.LastRequestBody!);
+        Assert.Contains(abuse, handler.LastRequestBody!);
     }
 }

@@ -22,7 +22,7 @@ public class SavedSearchAndThreatActorTests
     private const string ThreatActorId = "threat-actor-123";
 
     private static string SavedSearchJson(string id = "saved-search-abc")
-        => @"{ ""data"": { ""type"": ""saved_search"", ""id"": """ + id + @""", ""attributes"": { ""name"": """ + SavedSearchName + @""", ""query"": """ + SavedSearchQuery + @""" } } }";
+        => @"{ ""data"": { ""type"": ""saved_search"", ""id"": """ + id + @""", ""attributes"": { ""name"": """ + SavedSearchName + @""", ""search_query"": """ + SavedSearchQuery + @""" } } }";
 
     private static string ThreatActorJson(string id = ThreatActorId)
         => @"{ ""data"": { ""type"": ""threat_actor"", ""id"": """ + id + @""", ""attributes"": { ""name"": ""APT-1"", ""reputation"": 85, ""first_seen"": ""2023-01-15T00:00:00Z"", ""last_seen"": ""2024-12-31T23:59:59Z"" } } }";
@@ -48,7 +48,67 @@ public class SavedSearchAndThreatActorTests
         // Check that the request body contains the expected fields (JSON formatting may vary)
         Assert.Contains("saved_search", handler.LastRequestBody!);
         Assert.Contains("my-search", handler.LastRequestBody!);
+        Assert.Contains("search_query", handler.LastRequestBody!);
         Assert.Contains("type:file", handler.LastRequestBody!);
+    }
+
+    [Fact]
+    public async Task CreateSavedSearch_Posts_OptionalFields()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK, SavedSearchJson("saved-search-abc")));
+
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new SavedSearchClient(vt);
+
+        await client.CreateSavedSearchAsync(SavedSearchName, SavedSearchQuery, description: "desc", isPrivate: true, tags: new[] { "A", "B" });
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Contains("\"description\":\"desc\"", handler.LastRequestBody!);
+        Assert.Contains("\"private\":true", handler.LastRequestBody!);
+        Assert.Contains("\"tags\":[\"A\",\"B\"]", handler.LastRequestBody!);
+    }
+
+    [Fact]
+    public async Task CreateSavedSearch_EmptyNameOrQuery_Throws()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK, SavedSearchJson()));
+
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new SavedSearchClient(vt);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => client.CreateSavedSearchAsync(" ", SavedSearchQuery));
+        await Assert.ThrowsAsync<ArgumentException>(() => client.CreateSavedSearchAsync(SavedSearchName, ""));
+
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task GetSavedSearch_Deserializes_DocumentedAttributes()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                @"{ ""data"": { ""type"": ""saved_search"", ""id"": ""ss-full"", ""attributes"": {
+                      ""name"": ""full"", ""search_query"": ""type:url"", ""description"": ""my desc"",
+                      ""private"": true, ""tags"": [""T1""], ""origin"": ""Crowdsourced"",
+                      ""creation_date"": 1600000000, ""last_modification_date"": 1600000001, ""last_execution_date"": 1600000002 } } }"));
+
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new SavedSearchClient(vt);
+
+        var saved = await client.GetSavedSearchAsync("ss-full");
+
+        var attrs = saved!.Attributes!;
+        Assert.Equal("full", attrs.Name);
+        Assert.Equal("type:url", attrs.Query);
+        Assert.Equal("my desc", attrs.Description);
+        Assert.True(attrs.Private);
+        Assert.Equal(new[] { "T1" }, attrs.Tags);
+        Assert.Equal("Crowdsourced", attrs.Origin);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1600000000), attrs.CreatedAt);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1600000001), attrs.UpdatedAt);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1600000002), attrs.LastExecutedAt);
     }
 
     [Fact]
@@ -75,8 +135,8 @@ public class SavedSearchAndThreatActorTests
     {
         var handler = new StubHttpMessageHandler(
             StubHttpMessageHandler.Json(HttpStatusCode.OK,
-                @"{ ""data"": [ { ""type"": ""saved_search"", ""id"": ""ss1"", ""attributes"": { ""name"": ""search1"", ""query"": ""type:file"" } },
-                                  { ""type"": ""saved_search"", ""id"": ""ss2"", ""attributes"": { ""name"": ""search2"", ""query"": ""type:url"" } } ],
+                @"{ ""data"": [ { ""type"": ""saved_search"", ""id"": ""ss1"", ""attributes"": { ""name"": ""search1"", ""search_query"": ""type:file"" } },
+                                  { ""type"": ""saved_search"", ""id"": ""ss2"", ""attributes"": { ""name"": ""search2"", ""search_query"": ""type:url"" } } ],
                   ""meta"": { ""count"": 2, ""cursor"": ""abc123"" },
                   ""links"": { ""next"": ""https://vt.com/api/v3/saved_searches?cursor=abc123"" } }"));
 

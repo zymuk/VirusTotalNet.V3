@@ -1,11 +1,40 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using VirusTotalNet.V3.Core;
 using VirusTotalNet.V3.Models;
 
 namespace VirusTotalNet.V3.Clients;
+
+/// <summary>
+/// Well-known collection relationship names used by the element endpoints
+/// <c>/{collectionId}/{relationship}</c>.
+/// </summary>
+public static class CollectionRelationshipName
+{
+    /// <summary><c>files</c></summary>
+    public const string Files = "files";
+
+    /// <summary><c>urls</c></summary>
+    public const string Urls = "urls";
+
+    /// <summary><c>domains</c></summary>
+    public const string Domains = "domains";
+
+    /// <summary><c>ip_addresses</c></summary>
+    public const string IpAddresses = "ip_addresses";
+
+    private static readonly HashSet<string> Known = new(StringComparer.Ordinal)
+    {
+        Files, Urls, Domains, IpAddresses
+    };
+
+    /// <summary>Returns <c>true</c> when <paramref name="relationship"/> is a documented collection element relationship.</summary>
+    public static bool IsKnown(string relationship)
+        => Known.Contains(relationship);
+}
 
 /// <summary>Operations on collections (<c>/collections</c>).</summary>
 public interface ICollectionClient
@@ -22,14 +51,38 @@ public interface ICollectionClient
     /// <summary>Deletes a collection (<c>DELETE /collections/{id}</c>).</summary>
     Task DeleteCollectionAsync(string id, CancellationToken cancellationToken = default);
 
-    /// <summary>Adds elements to a collection (<c>POST /collections/{id}/relationships/elements</c>).</summary>
-    Task AddElementsAsync(string collectionId, IEnumerable<VtObjectId> elements, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Adds elements of one object type to a collection (<c>POST /collections/{id}/{relationship}</c>).
+    /// See <see cref="CollectionRelationshipName"/>.
+    /// </summary>
+    /// <param name="collectionId">Collection id.</param>
+    /// <param name="relationship">Element relationship name, e.g. <see cref="CollectionRelationshipName.Files"/>.</param>
+    /// <param name="elements">Object descriptors to add.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task AddElementsAsync(string collectionId, string relationship, IEnumerable<VtObjectId> elements, CancellationToken cancellationToken = default);
 
-    /// <summary>Removes elements from a collection (<c>DELETE /collections/{id}/relationships/elements</c>).</summary>
-    Task RemoveElementsAsync(string collectionId, IEnumerable<VtObjectId> elements, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Removes elements of one object type from a collection (<c>DELETE /collections/{id}/{relationship}</c>).
+    /// See <see cref="CollectionRelationshipName"/>.
+    /// </summary>
+    /// <param name="collectionId">Collection id.</param>
+    /// <param name="relationship">Element relationship name, e.g. <see cref="CollectionRelationshipName.Urls"/>.</param>
+    /// <param name="elements">Object descriptors to remove.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task RemoveElementsAsync(string collectionId, string relationship, IEnumerable<VtObjectId> elements, CancellationToken cancellationToken = default);
 
-    /// <summary>Lists elements of a collection (<c>GET /collections/{id}/relationships/elements</c>) with cursor pagination.</summary>
-    Task<VtCollection<VtObjectId>> ListElementsAsync(string collectionId, string? cursor = null, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Lists the related objects of one relationship of a collection
+    /// (<c>GET /collections/{id}/{relationship}</c>) with cursor pagination.
+    /// See <see cref="CollectionRelationshipName"/>.
+    /// </summary>
+    /// <typeparam name="T">Object type of the related resources (e.g. <see cref="FileObject"/>).</typeparam>
+    /// <param name="collectionId">Collection id.</param>
+    /// <param name="relationship">Element relationship name, e.g. <see cref="CollectionRelationshipName.IpAddresses"/>.</param>
+    /// <param name="cursor">Optional pagination cursor for the next page.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<VtCollection<T>> ListElementsAsync<T>(string collectionId, string relationship, string? cursor = null, CancellationToken cancellationToken = default)
+        where T : class;
 }
 
 /// <summary><see cref="ICollectionClient"/> implementation built on top of <see cref="VtClient"/>.</summary>
@@ -105,16 +158,15 @@ public sealed class CollectionClient : ICollectionClient
     }
 
     /// <inheritdoc />
-    public async Task AddElementsAsync(string collectionId, IEnumerable<VtObjectId> elements, CancellationToken cancellationToken = default)
+    public async Task AddElementsAsync(string collectionId, string relationship, IEnumerable<VtObjectId> elements, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(collectionId))
-            throw new ArgumentException("A collection id is required.", nameof(collectionId));
+        ValidateCollectionAndRelationship(collectionId, relationship);
 
         var elementList = elements?.ToList() ?? throw new ArgumentNullException(nameof(elements));
         if (elementList.Count == 0)
             throw new ArgumentException("At least one element must be provided.", nameof(elements));
 
-        var response = await _client.PostAsync<CollectionObject>($"/collections/{collectionId}/relationships/elements", new
+        var response = await _client.PostAsync<CollectionObject>($"/collections/{collectionId}/{relationship}", new
         {
             data = elementList
         }, cancellationToken).ConfigureAwait(false);
@@ -123,16 +175,15 @@ public sealed class CollectionClient : ICollectionClient
     }
 
     /// <inheritdoc />
-    public async Task RemoveElementsAsync(string collectionId, IEnumerable<VtObjectId> elements, CancellationToken cancellationToken = default)
+    public async Task RemoveElementsAsync(string collectionId, string relationship, IEnumerable<VtObjectId> elements, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(collectionId))
-            throw new ArgumentException("A collection id is required.", nameof(collectionId));
+        ValidateCollectionAndRelationship(collectionId, relationship);
 
         var elementList = elements?.ToList() ?? throw new ArgumentNullException(nameof(elements));
         if (elementList.Count == 0)
             throw new ArgumentException("At least one element must be provided.", nameof(elements));
 
-        var response = await _client.DeleteAsync<CollectionObject>($"/collections/{collectionId}/relationships/elements", new
+        var response = await _client.DeleteAsync<CollectionObject>($"/collections/{collectionId}/{relationship}", new
         {
             data = elementList
         }, cancellationToken).ConfigureAwait(false);
@@ -141,16 +192,26 @@ public sealed class CollectionClient : ICollectionClient
     }
 
     /// <inheritdoc />
-    public async Task<VtCollection<VtObjectId>> ListElementsAsync(string collectionId, string? cursor = null, CancellationToken cancellationToken = default)
+    public async Task<VtCollection<T>> ListElementsAsync<T>(string collectionId, string relationship, string? cursor = null, CancellationToken cancellationToken = default)
+        where T : class
     {
-        if (string.IsNullOrWhiteSpace(collectionId))
-            throw new ArgumentException("A collection id is required.", nameof(collectionId));
+        ValidateCollectionAndRelationship(collectionId, relationship);
 
-        var path = $"/collections/{collectionId}/relationships/elements";
+        var path = $"/collections/{collectionId}/{relationship}";
         if (cursor is not null)
             path += $"?cursor={Uri.EscapeDataString(cursor)}";
 
-        var response = await _client.GetAsync<List<VtObjectId>>(path, cancellationToken).ConfigureAwait(false);
-        return VtCollection<VtObjectId>.FromEnvelope(response.EnsureSuccess());
+        var response = await _client.GetAsync<List<T>>(path, cancellationToken).ConfigureAwait(false);
+        return VtCollection<T>.FromEnvelope(response.EnsureSuccess());
+    }
+
+    private static void ValidateCollectionAndRelationship(string collectionId, string relationship)
+    {
+        if (string.IsNullOrWhiteSpace(collectionId))
+            throw new ArgumentException("A collection id is required.", nameof(collectionId));
+        if (string.IsNullOrWhiteSpace(relationship))
+            throw new ArgumentException("A collection relationship is required.", nameof(relationship));
+        if (!CollectionRelationshipName.IsKnown(relationship))
+            throw new ArgumentException($"Unknown collection relationship \"{relationship}\".", nameof(relationship));
     }
 }

@@ -64,6 +64,40 @@ Assert.Contains("name=file", handler.LastRequestBody);
     }
 
     [Fact]
+    public async Task ScanFile_SendsPasswordField_WhenProvided()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                """{ "data": { "type": "analysis", "id": "a3" } }"""));
+
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new FileClient(vt);
+
+        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("PK..."));
+
+        await client.ScanFileAsync(stream, "protected.zip", password: "s3cret");
+
+        Assert.Contains("name=password", handler.LastRequestBody);
+        Assert.Contains("s3cret", handler.LastRequestBody);
+    }
+
+    [Fact]
+    public async Task ScanFile_OmitsPasswordField_WhenNotProvided()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                """{ "data": { "type": "analysis", "id": "a4" } }"""));
+
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new FileClient(vt);
+
+        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("PK..."));
+        await client.ScanFileAsync(stream, "plain.zip");
+
+        Assert.DoesNotContain("name=password", handler.LastRequestBody);
+    }
+
+    [Fact]
     public async Task ScanFile_DeserializesAnalysisAttributes()
     {
         const string json = """

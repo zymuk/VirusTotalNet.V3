@@ -39,3 +39,18 @@ public sealed class CommentObject : VtObject<CommentAttributes>
 public sealed class VoteObject : VtObject<VoteAttributes>
 {
 }
+
+/// <summary>
+/// The category of a vote cast on a comment (<c>POST /comments/{id}/vote</c>).
+/// </summary>
+public enum CommentVoteKind
+{
+    /// <summary>Positive vote.</summary>
+    Positive,
+
+    /// <summary>Negative vote.</summary>
+    Negative,
+
+    /// <summary>Abuse vote.</summary>
+    Abuse
+}

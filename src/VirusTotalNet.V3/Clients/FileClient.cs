@@ -18,9 +18,10 @@ public interface IFileClient
     /// </summary>
     /// <param name="stream">The file content to scan.</param>
     /// <param name="fileName">Name sent to the API; often used to infer the file type.</param>
+    /// <param name="password">Optional password for password-protected ZIP files.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The created analysis object; poll its id to retrieve the completed report.</returns>
-    Task<AnalysisObject> ScanFileAsync(Stream stream, string? fileName = null, CancellationToken cancellationToken = default);
+    Task<AnalysisObject> ScanFileAsync(Stream stream, string? fileName = null, string? password = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Uploads a file larger than <see cref="FileClient.MaxScanSize"/> using a pre-signed upload URL:
@@ -28,9 +29,10 @@ public interface IFileClient
     /// </summary>
     /// <param name="stream">The file content to scan (typically larger than 32 MiB).</param>
     /// <param name="fileName">Name sent to the API; often used to infer the file type.</param>
+    /// <param name="password">Optional password for password-protected ZIP files.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The created analysis object; poll its id to retrieve the completed report.</returns>
-    Task<AnalysisObject> ScanLargeFileAsync(Stream stream, string? fileName = null, CancellationToken cancellationToken = default);
+    Task<AnalysisObject> ScanLargeFileAsync(Stream stream, string? fileName = null, string? password = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Retrieves the report of a file identified by its MD5, SHA-1 or SHA-256 digest (<c>GET /files/{id}</c>).
@@ -79,7 +81,7 @@ public sealed class FileClient : IFileClient
     public FileClient(IVtClient client) => _client = client;
 
     /// <inheritdoc />
-    public async Task<AnalysisObject> ScanFileAsync(Stream stream, string? fileName = null, CancellationToken cancellationToken = default)
+    public async Task<AnalysisObject> ScanFileAsync(Stream stream, string? fileName = null, string? password = null, CancellationToken cancellationToken = default)
     {
         if (stream is null)
             throw new ArgumentNullException(nameof(stream));
@@ -87,14 +89,14 @@ public sealed class FileClient : IFileClient
         if (stream.CanSeek && stream.Length > MaxScanSize)
             throw new ArgumentOutOfRangeException(nameof(stream), $"Files larger than {MaxScanSize} bytes cannot be uploaded directly; use {nameof(ScanLargeFileAsync)} instead.");
 
-        using var content = BuildMultipartContent(stream, fileName);
+        using var content = BuildMultipartContent(stream, fileName, password);
 
         var response = await _client.PostAsync<AnalysisObject>("/files", content, cancellationToken).ConfigureAwait(false);
         return response.EnsureSuccess().Data ?? new AnalysisObject();
     }
 
     /// <inheritdoc />
-    public async Task<AnalysisObject> ScanLargeFileAsync(Stream stream, string? fileName = null, CancellationToken cancellationToken = default)
+    public async Task<AnalysisObject> ScanLargeFileAsync(Stream stream, string? fileName = null, string? password = null, CancellationToken cancellationToken = default)
     {
         if (stream is null)
             throw new ArgumentNullException(nameof(stream));
@@ -102,18 +104,20 @@ public sealed class FileClient : IFileClient
         var uploadUrlResponse = await _client.GetAsync<string>("/files/upload_url", cancellationToken).ConfigureAwait(false);
         var uploadUrl = uploadUrlResponse.EnsureSuccess().Data ?? throw new InvalidOperationException("The API returned no upload URL.");
 
-        using var content = BuildMultipartContent(stream, fileName);
+        using var content = BuildMultipartContent(stream, fileName, password);
 
         var response = await _client.PostAsync<AnalysisObject>(uploadUrl, content, cancellationToken).ConfigureAwait(false);
         return response.EnsureSuccess().Data ?? new AnalysisObject();
     }
 
-    private static MultipartFormDataContent BuildMultipartContent(Stream stream, string? fileName)
+    private static MultipartFormDataContent BuildMultipartContent(Stream stream, string? fileName, string? password)
     {
         var content = new MultipartFormDataContent();
         var fileContent = new StreamContent(stream);
         fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
         content.Add(fileContent, "file", fileName ?? "file");
+        if (!string.IsNullOrEmpty(password))
+            content.Add(new StringContent(password), "password");
         return content;
     }
 

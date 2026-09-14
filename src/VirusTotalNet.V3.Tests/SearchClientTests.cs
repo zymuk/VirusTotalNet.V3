@@ -84,4 +84,37 @@ public class SearchClientTests
 
         Assert.Empty(handler.Requests);
     }
+
+    [Fact]
+    public async Task Search_OrderAndLimit_AreAppended()
+    {
+        var handler = new StubHttpMessageHandler(
+            request => StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                """{ "data": [ { "type": "file", "id": "cccc000000000000000000000000000000000000000000000000000000000000" } ], "meta": { "count": 1 } }"""));
+
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new SearchClient(vt);
+
+        await client.SearchAsync(Query, cursor: "c-9", descriptorsOnly: true, order: "date+", limit: 50);
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(
+            VirusTotalOptions.DefaultBaseAddress + "intelligence/search?query=type%3Aurl%20content%3Amalware&descriptors_only=true&order=date%2B&limit=50&cursor=c-9",
+            request.RequestUri!.AbsoluteUri);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    [InlineData(301)]
+    public async Task Search_InvalidLimit_Throws(int limit)
+    {
+        var handler = new StubHttpMessageHandler(StubHttpMessageHandler.Json(HttpStatusCode.OK, """{ "data": [] }"""));
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new SearchClient(vt);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => client.SearchAsync(Query, limit: limit));
+
+        Assert.Empty(handler.Requests);
+    }
 }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using VirusTotalNet.V3.Core;
@@ -9,8 +10,11 @@ namespace VirusTotalNet.V3.Clients;
 /// <summary>Operations on saved searches (<c>/saved_searches</c>).</summary>
 public interface ISavedSearchClient
 {
-    /// <summary>Creates a saved search (<c>POST /saved_searches</c>).</summary>
-    Task<SavedSearchObject> CreateSavedSearchAsync(string name, string query, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Creates a saved search (<c>POST /saved_searches</c>).
+    /// The query is stored under the API's <c>search_query</c> attribute.
+    /// </summary>
+    Task<SavedSearchObject> CreateSavedSearchAsync(string name, string query, string? description = null, bool? isPrivate = null, IReadOnlyList<string>? tags = null, CancellationToken cancellationToken = default);
 
     /// <summary>Retrieves a saved search (<c>GET /saved_searches/{id}</c>).</summary>
     Task<SavedSearchObject> GetSavedSearchAsync(string id, CancellationToken cancellationToken = default);
@@ -31,19 +35,28 @@ public sealed class SavedSearchClient : ISavedSearchClient
     public SavedSearchClient(IVtClient client) => _client = client;
 
     /// <inheritdoc />
-    public async Task<SavedSearchObject> CreateSavedSearchAsync(string name, string query, CancellationToken cancellationToken = default)
+    public async Task<SavedSearchObject> CreateSavedSearchAsync(string name, string query, string? description = null, bool? isPrivate = null, IReadOnlyList<string>? tags = null, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("A saved search name is required.", nameof(name));
         if (string.IsNullOrWhiteSpace(query))
             throw new ArgumentException("A saved search query is required.", nameof(query));
 
+        var attributes = new Dictionary<string, object>
+        {
+            ["name"] = name,
+            ["search_query"] = query
+        };
+        if (description is not null) attributes["description"] = description;
+        if (isPrivate is not null) attributes["private"] = isPrivate;
+        if (tags is not null) attributes["tags"] = tags;
+
         var response = await _client.PostAsync<SavedSearchObject>("/saved_searches", new
         {
             data = new
             {
                 type = "saved_search",
-                attributes = new { name, query }
+                attributes
             }
         }, cancellationToken).ConfigureAwait(false);
         return response.EnsureSuccess().Data ?? throw new InvalidOperationException("The API returned no saved search.");

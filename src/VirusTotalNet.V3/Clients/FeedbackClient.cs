@@ -49,6 +49,37 @@ public interface IFeedbackClient
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The created vote object.</returns>
     Task<VoteObject> AddVoteAsync(string objectType, string id, string verdict, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lists the most recent comments across the community (<c>GET /comments</c>).
+    /// </summary>
+    /// <param name="filter">Optional filter expression, e.g. <c>attributes.date:2020-04-01T00:00:00Z</c>.</param>
+    /// <param name="limit">Optional maximum number of comments to return.</param>
+    /// <param name="cursor">Optional pagination cursor for the next page.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<VtCollection<CommentObject>> ListLatestCommentsAsync(string? filter = null, int? limit = null, string? cursor = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Retrieves a single comment object (<c>GET /comments/{id}</c>).
+    /// </summary>
+    /// <param name="commentId">Comment id (see the <c>d|f|g|i|u</c> id prefixes from the API docs).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<CommentObject> GetCommentAsync(string commentId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes a comment (<c>DELETE /comments/{id}</c>). Only the author can delete it.
+    /// </summary>
+    /// <param name="commentId">Comment id.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task DeleteCommentAsync(string commentId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Casts a vote on a comment (<c>POST /comments/{id}/vote</c>).
+    /// </summary>
+    /// <param name="commentId">Comment id.</param>
+    /// <param name="vote">The vote category (positive, negative or abuse).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task VoteCommentAsync(string commentId, CommentVoteKind vote, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -99,6 +130,70 @@ public sealed class FeedbackClient : IFeedbackClient
         var body = new { data = new { type = VtObjectType.Vote, attributes = new { verdict } } };
         var response = await _client.PostAsync<VoteObject>(path + "/votes", body, cancellationToken).ConfigureAwait(false);
         return response.EnsureSuccess().Data ?? new VoteObject();
+    }
+
+    /// <inheritdoc />
+    public async Task<VtCollection<CommentObject>> ListLatestCommentsAsync(string? filter = null, int? limit = null, string? cursor = null, CancellationToken cancellationToken = default)
+    {
+        if (limit is < 1)
+            throw new ArgumentOutOfRangeException(nameof(limit), "The limit must be at least 1.");
+
+        var parameters = new List<string>();
+        if (filter is not null && filter.Trim().Length > 0)
+            parameters.Add($"filter={Uri.EscapeDataString(filter.Trim())}");
+        if (limit is not null)
+            parameters.Add($"limit={limit}");
+        if (cursor is not null && cursor.Trim().Length > 0)
+            parameters.Add($"cursor={Uri.EscapeDataString(cursor)}");
+
+        var path = parameters.Count == 0 ? "/comments" : "/comments?" + string.Join("&", parameters);
+
+        var response = await _client.GetAsync<List<CommentObject>>(path, cancellationToken).ConfigureAwait(false);
+        return VtCollection<CommentObject>.FromEnvelope(response.EnsureSuccess());
+    }
+
+    /// <inheritdoc />
+    public async Task<CommentObject> GetCommentAsync(string commentId, CancellationToken cancellationToken = default)
+    {
+        var id = ValidateCommentId(commentId);
+
+        var response = await _client.GetAsync<CommentObject>($"/comments/{id}", cancellationToken).ConfigureAwait(false);
+        return response.EnsureSuccess().Data ?? new CommentObject();
+    }
+
+    /// <inheritdoc />
+    public async Task DeleteCommentAsync(string commentId, CancellationToken cancellationToken = default)
+    {
+        var id = ValidateCommentId(commentId);
+
+        var response = await _client.DeleteAsync<CommentObject>($"/comments/{id}", cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccess();
+    }
+
+    /// <inheritdoc />
+    public async Task VoteCommentAsync(string commentId, CommentVoteKind vote, CancellationToken cancellationToken = default)
+    {
+        var id = ValidateCommentId(commentId);
+
+        var body = new
+        {
+            data = new
+            {
+                abuse = vote == CommentVoteKind.Abuse ? 1 : 0,
+                negative = vote == CommentVoteKind.Negative ? 1 : 0,
+                positive = vote == CommentVoteKind.Positive ? 1 : 0
+            }
+        };
+
+        var response = await _client.PostAsync<CommentObject>($"/comments/{id}/vote", body, cancellationToken).ConfigureAwait(false);
+        response.EnsureSuccess();
+    }
+
+    private static string ValidateCommentId(string commentId)
+    {
+        if (string.IsNullOrWhiteSpace(commentId))
+            throw new ArgumentException("A comment id is required.", nameof(commentId));
+        return commentId.Trim();
     }
 
     private static string ValidatePath(string objectType, string id)

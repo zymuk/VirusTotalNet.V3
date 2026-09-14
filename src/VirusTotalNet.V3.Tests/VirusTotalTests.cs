@@ -119,4 +119,32 @@ public class VirusTotalTests
         await Assert.ThrowsAsync<ArgumentNullException>(() => vt.GetFileReportAsync((byte[])null!));
         await Assert.ThrowsAsync<ArgumentException>(() => vt.GetFileReportAsync((string)null!));
     }
+
+    [Fact]
+    public void Facade_Exposes_All_Module_Clients()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK, """{ "data": null }"""));
+
+        using var vt = CreateVirusTotal(handler);
+
+        Assert.NotNull(vt.FileClient);
+        Assert.NotNull(vt.AnalysisClient);
+        Assert.NotNull(vt.UrlClient);
+        Assert.NotNull(vt.DomainClient);
+        Assert.NotNull(vt.IpClient);
+        Assert.NotNull(vt.Behaviour);
+        Assert.NotNull(vt.Feedback);
+        Assert.NotNull(vt.Search);
+        Assert.NotNull(vt.Relationships);
+        Assert.NotNull(vt.SavedSearchClient);
+        Assert.NotNull(vt.CollectionClient);
+        Assert.NotNull(vt.GraphClient);
+        Assert.NotNull(vt.ThreatActor);
+        Assert.NotNull(vt.Feeds);
+        Assert.NotNull(vt.PrivateScanning);
+        Assert.NotNull(vt.Hunting);
+        Assert.NotNull(vt.Retrohunt);
+        Assert.NotNull(vt.Users);
+    }
 }

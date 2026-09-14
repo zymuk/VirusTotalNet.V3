@@ -6,21 +6,25 @@
 
 * Zero external dependencies; targets `net8.0` (trimmable, AOT-compatible) and `netstandard2.0`, packaged as `VirusTotalNet.V3`
 * Single envelope `VtResponse<T>` with lossless `JsonExtensionData` and tolerant JSON converters (string-typed numbers, Unix timestamps, crammed dates) for every endpoint
-* `VtClient` — `x-apikey` auth, base URL, AOT-safe overloads, shared rate limiter (4 req/min & 500 req/day), retry with exponential backoff + jitter; maps `error.code` to a typed exception hierarchy (`ThrowOnError` toggle)
-* Files — scan (≤ 32 MB), upload > 32 MB via pre-signed URL, report by md5/sha1/sha256, rescan, download; typed per-engine results (`LastAnalysisResults`) plus aggregated `LastAnalysisStats`
+* `VtClient` — `x-apikey` auth, base URL, AOT-safe overloads, shared rate limiter (4 req/min & 500 req/day), retry with exponential backoff + jitter; maps `error.code` to a typed exception hierarchy (`ThrowOnError` toggle); `GetRawAsync<T>` for the handful of endpoints with bare (non-envelope) JSON payloads
+* Files — scan (≤ 32 MB), upload > 32 MB via pre-signed URL, report by md5/sha1/sha256, rescan, download; optional ZIP `password` for encrypted archives; typed per-engine results (`LastAnalysisResults`) plus aggregated `LastAnalysisStats`
 * Analyses — get analysis, `WaitForCompletionAsync` with configurable polling
 * URLs / Domains / IPs — scan, get, rescan; resolutions, subdomains
-* Comments & votes on any object type (list + create)
+* Comments & votes on any object type (list + create), plus comment management — `GET /comments` (filter/limit/cursor), `GET/DELETE /comments/{id}`, and voting on a comment (`POST /comments/{id}/vote` as `Positive`/`Negative`/`Abuse` counts)
+* Saved searches — create (name + `search_query`, optional description/private/tags), list, get, delete under `/saved_searches`
+* Collections — create/get/update/delete collections and manage element relationships `/collections/{id}/{files|urls|domains|ip_addresses}` (add/remove/list)
+* Graphs — create/update/get/delete `/graphs` with the documented `graph_data`/`nodes`/`links`/`private` schema (create requires at least one payload)
+* Threat actors — retrieve `/threat_actors/{id}` profiles
 * Relationships — typed accessors + generic fallback, descriptor-first ids, memoized `IAsyncEnumerable` traversal
 * Behaviours — per-file sandbox behaviour reports (`IBehaviourClient`/`BehaviourClient`): retrieve a `file_behaviour`, download EVTX/PCAP/memdump/HTML artifacts
-* Search — `/intelligence/search` via `ISearchClient`/`SearchClient` (cursor pagination, `descriptors_only` mode)
-* Feeds (premium) — `IFeedsClient`/`FeedsClient` streams bzip2-compressed NDJSON batches of files, URLs, domains, IPs and file behaviours (`/feeds/.../{time}`, per-minute + hourly tar.bz2); raw `Stream` returned so you can decompress any way you like
+* Search — `/intelligence/search` via `ISearchClient`/`SearchClient` (cursor pagination, `descriptors_only` mode, `order`, `limit` up to 300)
+* Feeds (premium) — `IFeedsClient`/`FeedsClient` streams bzip2-compressed NDJSON batches of files, URLs, domains, IPs and file behaviours (`/feeds/{type}/{time}` per-minute; `/feeds/{type}/hourly/{time}` hourly for all five types); raw `Stream` returned so you can decompress any way you like
 * Private scanning (premium) — `IPrivateScanningClient`/`PrivateScanningClient`: upload samples under `/private/files` (multipart with sandbox/network/TLS options), upload URL, list/get/delete, analyse, retrieve private analyses and behaviour reports without sharing samples publicly
-* Livehunt hunting rulesets — `IHuntingClient`/`HuntingClient`: create/list/get/update/delete YARA rulesets under `/intelligence/hunting_rulesets`, plus list/get hunting notifications (filter/order/limit, cursor-paged)
-* Retrohunt — `IRetrohuntClient`/`RetrohuntClient`: create/list/get/abort `/intelligence/retrohunt_jobs` (rules, notification email, corpus, time range) and list the matching files
-* Users & groups — `IUsersClient`/`UsersClient`: get/update/delete users and groups, manage group membership (list / add / remove)
+* Livehunt hunting rulesets — `IHuntingClient`/`HuntingClient`: create/list/get/update/delete YARA rulesets under `/intelligence/hunting_rulesets` (fail-fast on rule name, rules and match object type), list/get hunting notifications, and read the Intelligence IoC Stream (`/ioc_stream`, filter/limit/order/cursor-paged with notification context)
+* Retrohunt — `IRetrohuntClient`/`RetrohuntClient`: create/list/get/abort `/intelligence/retrohunt_jobs` (rules, notification email, `main`/`goodware` corpus, time range) and list the matching files
+* Users & groups — `IUsersClient`/`UsersClient`: get/update/delete users and groups, manage group membership (add/remove via `/groups/{id}/relationships/users`, assign group roles `USER_ROLE_GROUP_ADMIN`/`USER_ROLE_PRIVATE_SCANNING` as set/add/remove), and read per-user API usage breakdowns
 * Error handling — `ThrowOnError=false` returns the error envelope; Result-style `VtResult<T>` through `IVtClient.Try*`, so checks never need a try/catch
-* `VirusTotal` facade — v2-style one-liners: `GetFileReportAsync(hash)` / `GetFileReportAsync(bytes)`, auto-scans and waits when the file is unknown
+* `VirusTotal` facade — v2-style one-liners: `GetFileReportAsync(hash)` / `GetFileReportAsync(bytes)`, auto-scans and waits when the file is unknown; exposes all 18 module clients (`FileClient`, `AnalysisClient`, `Relationships`, `UrlClient`, `DomainClient`, `IpClient`, `Behaviour`, `Feedback`, `Search`, `SavedSearchClient`, `CollectionClient`, `GraphClient`, `ThreatActor`, `Feeds`, `PrivateScanning`, `Hunting`, `Retrohunt`, `Users`)
 * DI — optional `VirusTotalNet.V3.DependencyInjection` package: `AddVirusTotal` (options delegate or `IConfiguration` section) registers the client, all module clients and the facade behind one shared `IVtClient`
 
 ### Examples
