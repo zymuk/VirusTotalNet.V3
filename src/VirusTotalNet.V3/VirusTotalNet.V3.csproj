@@ -8,7 +8,7 @@
     <AssemblyName>VirusTotalNet.V3</AssemblyName>
     <RootNamespace>VirusTotalNet.V3</RootNamespace>
     <PackageId>VirusTotalNet.V3</PackageId>
-    <Version>0.7.0-beta</Version>
+    <Version>0.8.0-beta</Version>
     <Authors>Tran T. Ngoc</Authors>
     <Description>A modern .NET client for the VirusTotal API v3. Strongly-typed yet lossless, rate-limit aware, zero external dependencies on .NET 8+.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
