@@ -123,4 +123,37 @@ public class VtClientTests
         Assert.Equal("application/json", request.Content!.Headers.ContentType!.MediaType);
         Assert.Equal("a1", response.Data!.Id);
     }
+
+    [Fact]
+    public async Task Delete_NoContent_ReturnsEmptyEnvelope()
+    {
+        var handler = new StubHttpMessageHandler(
+            new HttpResponseMessage(HttpStatusCode.NoContent) { Content = new StringContent("") });
+
+        using var client = new VtClient(Options(), new HttpClient(handler));
+
+        var response = await client.DeleteAsync<CollectionObject>("/collections/c1");
+
+        Assert.NotNull(response);
+        Assert.Null(response.Data);
+        Assert.Null(response.Error);
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Delete, request.Method);
+    }
+
+    [Fact]
+    public async Task Delete_EmptyBody_ReturnsEmptyEnvelope()
+    {
+        var handler = new StubHttpMessageHandler(
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") });
+
+        using var client = new VtClient(Options(), new HttpClient(handler));
+
+        var response = await client.DeleteAsync<CollectionObject>("/collections/c1");
+
+        Assert.NotNull(response);
+        Assert.Null(response.Data);
+        Assert.Null(response.Error);
+    }
 }

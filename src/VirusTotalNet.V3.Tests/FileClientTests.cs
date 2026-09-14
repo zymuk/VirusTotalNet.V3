@@ -200,6 +200,39 @@ Assert.Contains("name=file", handler.LastRequestBody);
     }
 
     [Fact]
+    public async Task ScanFile_Retry_RebuildsMultipartContentPerAttempt()
+    {
+        var attempts = 0;
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            attempts++;
+            return attempts == 1
+                ? StubHttpMessageHandler.Json(HttpStatusCode.InternalServerError,
+                    """{ "error": { "code": "InternalServerError", "message": "boom" } }""")
+                : StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                    """{ "data": { "type": "analysis", "id": "analysis-retry" } }""");
+        });
+
+        var options = Options();
+        options.UseRetry = true;
+        options.MaxRetries = 2;
+
+        using var vt = new VtClient(options, new HttpClient(handler));
+        var client = new FileClient(vt);
+
+        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("retry-me"));
+        var analysis = await client.ScanFileAsync(stream, "retry.bin");
+
+        Assert.Equal("analysis-retry", analysis!.Id);
+        Assert.Equal(2, attempts);
+
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal(HttpMethod.Post, handler.Requests[0].Method);
+        Assert.Equal(HttpMethod.Post, handler.Requests[1].Method);
+        Assert.Contains("retry-me", handler.LastRequestBody!);
+    }
+
+    [Fact]
     public async Task ScanFile_OversizedStream_Throws()
     {
         var handler = new StubHttpMessageHandler(
@@ -217,6 +250,47 @@ Assert.Contains("name=file", handler.LastRequestBody);
         }
 
         Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task ScanFile_AtMaximumSize_IsAllowed()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                """{ "data": { "type": "analysis", "id": "analysis-max" } }"""));
+
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new FileClient(vt);
+
+        var max = new MemoryStream(new byte[FileClient.MaxScanSize]);
+
+        await using (max)
+        {
+            var analysis = await client.ScanFileAsync(max, "max.bin");
+            Assert.Equal("analysis-max", analysis!.Id);
+        }
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Post, request.Method);
+    }
+
+    [Fact]
+    public async Task ScanFile_NonSeekableStream_SkipsSizeCheckAndUploads()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                """{ "data": { "type": "analysis", "id": "analysis-ns" } }"""));
+
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new FileClient(vt);
+
+        await using var stream = new NonSeekableMemoryStream(Encoding.UTF8.GetBytes("payload"));
+        var analysis = await client.ScanFileAsync(stream, "ns.bin");
+
+        Assert.Equal("analysis-ns", analysis!.Id);
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Post, request.Method);
     }
 
     [Fact]
@@ -285,6 +359,26 @@ Assert.Contains("name=file", handler.LastRequestBody);
         Assert.Equal(5, attrs.LastAnalysisStats!.Malicious);
         Assert.Equal(60, attrs.LastAnalysisStats.Harmless);
         Assert.Equal(4, attrs.LastAnalysisStats.TypeUnsupported);
+    }
+
+    [Fact]
+    public async Task GetFile_NotFound_MapsToNotFoundException()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.NotFound,
+                """{ "error": { "code": "NotFoundError", "message": "Resource not found" } }"""));
+
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new FileClient(vt);
+
+        var ex = await Assert.ThrowsAsync<NotFoundException>(
+            () => client.GetFileAsync("deadbeef"));
+
+        Assert.Equal("NotFoundError", ex.ErrorCode);
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Get, request.Method);
+        Assert.Equal(VirusTotalOptions.DefaultBaseAddress + "files/deadbeef", request.RequestUri!.ToString());
     }
 
     [Fact]
@@ -467,5 +561,14 @@ Assert.Contains("name=file", handler.LastRequestBody);
 
         await Assert.ThrowsAsync<ArgumentNullException>(
             () => client.ScanLargeFileAsync(null!, "big.rar"));
+    }
+
+    private sealed class NonSeekableMemoryStream : MemoryStream
+    {
+        public NonSeekableMemoryStream(byte[] buffer) : base(buffer, writable: false)
+        {
+        }
+
+        public override bool CanSeek => false;
     }
 }

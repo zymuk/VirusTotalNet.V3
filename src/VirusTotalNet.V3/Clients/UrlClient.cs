@@ -70,10 +70,11 @@ public sealed class UrlClient : IUrlClient
         if (string.IsNullOrWhiteSpace(url))
             throw new ArgumentException("A URL is required.", nameof(url));
 
-        using var content = new System.Net.Http.FormUrlEncodedContent(
-            new[] { new KeyValuePair<string, string>("url", url) });
-
-        var response = await _client.PostAsync<AnalysisObject>("/urls", content, cancellationToken).ConfigureAwait(false);
+        var response = await _client.PostAsync<AnalysisObject>(
+            "/urls",
+            () => new System.Net.Http.FormUrlEncodedContent(
+                new[] { new KeyValuePair<string, string>("url", url) }),
+            cancellationToken).ConfigureAwait(false);
         return response.EnsureSuccess().Data ?? new AnalysisObject();
     }
 

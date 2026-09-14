@@ -262,8 +262,8 @@ public class UserFlowTests
     [Fact]
     public async Task ScanFileAsync_ByPath_LikeGenboxV2_UploadsAndReturnsAnalysis()
     {
-        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".com");
-        await File.WriteAllBytesAsync(path, EicarBytes());
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + ".bin");
+        await File.WriteAllBytesAsync(path, Encoding.ASCII.GetBytes("NOT_EICAR_test_bytes"));
 
         try
         {

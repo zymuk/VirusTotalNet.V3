@@ -210,6 +210,18 @@ public sealed class VtClient : IVtClient, IDisposable
             cancellationToken).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
+    public async Task<VtResponse<T>> PostAsync<T>(string uri, Func<HttpContent> contentFactory, CancellationToken cancellationToken = default)
+    {
+        if (contentFactory is null)
+            throw new ArgumentNullException(nameof(contentFactory));
+
+        return await SendWithRetryAsync(
+            () => new HttpRequestMessage(HttpMethod.Post, BuildRelativeUri(uri)) { Content = contentFactory() },
+            DeserializeResponse<T>,
+            cancellationToken).ConfigureAwait(false);
+    }
+
 /// <inheritdoc />
         public async Task<VtResponse<T>> DeleteAsync<T>(string uri, CancellationToken cancellationToken = default)
         {
@@ -505,6 +517,9 @@ public sealed class VtClient : IVtClient, IDisposable
     {
         if (response.IsSuccessStatusCode)
         {
+            if (IsEmptyResponse(response))
+                return new VtResponse<T>();
+
             var stream = await ReadContentStream(response).ConfigureAwait(false);
             var envelope = await DeserializeAsync<T>(stream, cancellationToken).ConfigureAwait(false);
 
@@ -547,6 +562,9 @@ public sealed class VtClient : IVtClient, IDisposable
     {
         if (response.IsSuccessStatusCode)
         {
+            if (IsEmptyResponse(response))
+                return new VtResponse<T>();
+
             var stream = await ReadContentStream(response).ConfigureAwait(false);
             var envelope = await JsonSerializer.DeserializeAsync(stream, typeInfo, cancellationToken).ConfigureAwait(false);
 
@@ -624,6 +642,14 @@ public sealed class VtClient : IVtClient, IDisposable
 #else
         return await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
 #endif
+    }
+
+    private static bool IsEmptyResponse(HttpResponseMessage response)
+    {
+        if (response.StatusCode is HttpStatusCode.NoContent or HttpStatusCode.ResetContent or HttpStatusCode.NotModified)
+            return true;
+
+        return response.Content?.Headers.ContentLength == 0;
     }
 
     private static Uri BuildRelativeUri(string uri)

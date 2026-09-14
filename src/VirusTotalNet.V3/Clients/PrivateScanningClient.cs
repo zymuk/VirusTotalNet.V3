@@ -80,9 +80,15 @@ public sealed class PrivateScanningClient : IPrivateScanningClient
         if (file is null)
             throw new ArgumentNullException(nameof(file));
 
-        using var content = BuildMultipartContent(file, disableSandbox, enableInternet, interceptTls, commandLine, password, retentionPeriodDays, storageRegion);
-
-        var response = await _client.PostAsync<AnalysisObject>("/private/files", content, cancellationToken).ConfigureAwait(false);
+        var response = await _client.PostAsync<AnalysisObject>(
+            "/private/files",
+            () =>
+            {
+                if (file.CanSeek)
+                    file.Position = 0;
+                return BuildMultipartContent(file, disableSandbox, enableInternet, interceptTls, commandLine, password, retentionPeriodDays, storageRegion);
+            },
+            cancellationToken).ConfigureAwait(false);
         return response.EnsureSuccess().Data ?? throw new InvalidOperationException("The API returned no analysis.");
     }
 

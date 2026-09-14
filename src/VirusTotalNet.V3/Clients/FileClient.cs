@@ -89,9 +89,17 @@ public sealed class FileClient : IFileClient
         if (stream.CanSeek && stream.Length > MaxScanSize)
             throw new ArgumentOutOfRangeException(nameof(stream), $"Files larger than {MaxScanSize} bytes cannot be uploaded directly; use {nameof(ScanLargeFileAsync)} instead.");
 
-        using var content = BuildMultipartContent(stream, fileName, password);
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer).ConfigureAwait(false);
+        var bytes = buffer.ToArray();
 
-        var response = await _client.PostAsync<AnalysisObject>("/files", content, cancellationToken).ConfigureAwait(false);
+        // The multipart body is rebuilt on every attempt: the transport disposes HttpContent after
+        // the first send, and VirusTotal answers POST /files with an HTTP 307 that HttpClient
+        // re-serializes, so a single reusable StreamContent would be exhausted/disposed mid-flight.
+        var response = await _client.PostAsync<AnalysisObject>(
+            "/files",
+            () => BuildMultipartContent(bytes, fileName, password),
+            cancellationToken).ConfigureAwait(false);
         return response.EnsureSuccess().Data ?? new AnalysisObject();
     }
 
@@ -104,10 +112,27 @@ public sealed class FileClient : IFileClient
         var uploadUrlResponse = await _client.GetAsync<string>("/files/upload_url", cancellationToken).ConfigureAwait(false);
         var uploadUrl = uploadUrlResponse.EnsureSuccess().Data ?? throw new InvalidOperationException("The API returned no upload URL.");
 
-        using var content = BuildMultipartContent(stream, fileName, password);
-
-        var response = await _client.PostAsync<AnalysisObject>(uploadUrl, content, cancellationToken).ConfigureAwait(false);
+        var response = await _client.PostAsync<AnalysisObject>(
+            uploadUrl,
+            () =>
+            {
+                if (stream.CanSeek)
+                    stream.Position = 0;
+                return BuildMultipartContent(stream, fileName, password);
+            },
+            cancellationToken).ConfigureAwait(false);
         return response.EnsureSuccess().Data ?? new AnalysisObject();
+    }
+
+    private static MultipartFormDataContent BuildMultipartContent(byte[] bytes, string? fileName, string? password)
+    {
+        var content = new MultipartFormDataContent();
+        var fileContent = new ByteArrayContent(bytes);
+        fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+        content.Add(fileContent, "file", fileName ?? "file");
+        if (!string.IsNullOrEmpty(password))
+            content.Add(new StringContent(password), "password");
+        return content;
     }
 
     private static MultipartFormDataContent BuildMultipartContent(Stream stream, string? fileName, string? password)

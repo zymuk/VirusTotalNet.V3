@@ -50,6 +50,14 @@ public interface IVtClient
     Task<VtResponse<T>> PostAsync<T>(string uri, HttpContent content, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Performs a POST request whose body is built lazily by <paramref name="contentFactory"/>.
+    /// The factory is invoked once per attempt, so retries and redirect re-sends always get a
+    /// fresh, undisposed <see cref="HttpContent"/> (a single instance is disposed by the transport
+    /// after the first send and cannot be reused).
+    /// </summary>
+    Task<VtResponse<T>> PostAsync<T>(string uri, Func<HttpContent> contentFactory, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Result-style GET that never throws for API errors: returns a <see cref="VtResult{T}"/>
     /// carrying either the payload or the error. Transport/retry/rate-limit semantics match
     /// <see cref="GetAsync{T}(string, CancellationToken)"/>; <see cref="VirusTotalOptions.ThrowOnError"/>

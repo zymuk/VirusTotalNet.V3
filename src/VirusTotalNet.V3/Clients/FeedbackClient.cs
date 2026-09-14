@@ -107,7 +107,7 @@ public sealed class FeedbackClient : IFeedbackClient
         if (string.IsNullOrWhiteSpace(text))
             throw new ArgumentException("Comment text is required.", nameof(text));
 
-        var body = new { data = new { type = VtObjectType.Comment, attributes = new { text } } };
+        var body = new { data = new { type = "comment", attributes = new { text } } };
         var response = await _client.PostAsync<CommentObject>(path + "/comments", body, cancellationToken).ConfigureAwait(false);
         return response.EnsureSuccess().Data ?? new CommentObject();
     }
@@ -127,7 +127,7 @@ public sealed class FeedbackClient : IFeedbackClient
         if (!IsValidVerdict(verdict))
             throw new ArgumentException("The verdict must be either \"harmless\" or \"malicious\".", nameof(verdict));
 
-        var body = new { data = new { type = VtObjectType.Vote, attributes = new { verdict } } };
+        var body = new { data = new { type = "vote", attributes = new { verdict } } };
         var response = await _client.PostAsync<VoteObject>(path + "/votes", body, cancellationToken).ConfigureAwait(false);
         return response.EnsureSuccess().Data ?? new VoteObject();
     }

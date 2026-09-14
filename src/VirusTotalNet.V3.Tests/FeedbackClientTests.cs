@@ -56,6 +56,7 @@ public class FeedbackClientTests
         Assert.Equal(VirusTotalOptions.DefaultBaseAddress + "ip_addresses/8.8.8.8/comments", request.RequestUri!.ToString());
 
         Assert.Contains(""""type":"comment"""", handler.LastRequestBody);
+        Assert.DoesNotContain(""""type":"comments"""", handler.LastRequestBody);
         Assert.Contains(""""text":"hi"""", handler.LastRequestBody);
     }
 
@@ -98,6 +99,7 @@ public class FeedbackClientTests
         Assert.Equal(VirusTotalOptions.DefaultBaseAddress + "domains/example.com/votes", request.RequestUri!.ToString());
 
         Assert.Contains(""""type":"vote"""", handler.LastRequestBody);
+        Assert.DoesNotContain(""""type":"votes"""", handler.LastRequestBody);
         Assert.Contains(""""verdict":"harmless"""", handler.LastRequestBody);
     }
 
