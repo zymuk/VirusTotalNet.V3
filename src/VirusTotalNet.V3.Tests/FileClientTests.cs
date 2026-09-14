@@ -136,6 +136,70 @@ Assert.Contains("name=file", handler.LastRequestBody);
     }
 
     [Fact]
+    public async Task ScanFile_DeserializesTypedResultsAndFiles()
+    {
+        const string json = """
+            {
+              "data": {
+                "type": "analysis",
+                "id": "analysis-43",
+                "attributes": {
+                  "status": "completed",
+                  "date": 1704067200,
+                  "stats": { "malicious": 5, "harmless": 1, "undetected": 0, "suspicious": 0, "type-unsupported": 0, "timeout": 0 },
+                  "results": {
+                    "ALYac": {
+                      "category": "malicious",
+                      "engine_name": "ALYac",
+                      "engine_version": "1.1.1.5",
+                      "engine_update": "20200609",
+                      "method": "blacklist",
+                      "result": "Dialer.Webdialer.F"
+                    },
+                    "ClamAV": {
+                      "category": "malicious",
+                      "engine_name": "ClamAV",
+                      "method": "blacklist",
+                      "result": "Win.Trojan.Dialer-83"
+                    }
+                  },
+                  "files": {
+                    "abc123": { "md5": "d41d8cd9", "sha1": "da39a3ee", "sha256": "abc123", "names": ["setup.exe", "installer.exe"] }
+                  }
+                }
+              }
+            }
+            """;
+
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK, json));
+
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new FileClient(vt);
+
+        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("bytes"));
+        var analysis = await client.ScanFileAsync(stream, "x.bin");
+
+        var attrs = analysis.Attributes;
+        Assert.NotNull(attrs);
+
+        var results = attrs!.Results;
+        Assert.NotNull(results);
+        Assert.Equal(2, results!.Count);
+        Assert.Equal("malicious", results["ALYac"].Category);
+        Assert.Equal("Dialer.Webdialer.F", results["ALYac"].Result);
+        Assert.Equal("ClamAV", results["ClamAV"].EngineName);
+
+        var files = attrs.Files;
+        Assert.NotNull(files);
+        Assert.Single(files!);
+        var file = files!["abc123"];
+        Assert.Equal("d41d8cd9", file.Md5);
+        Assert.Equal("abc123", file.Sha256);
+        Assert.Equal(new[] { "setup.exe", "installer.exe" }, file.Names);
+    }
+
+    [Fact]
     public async Task ScanFile_OversizedStream_Throws()
     {
         var handler = new StubHttpMessageHandler(
