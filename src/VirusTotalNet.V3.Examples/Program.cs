@@ -1,7 +1,6 @@
 using System.Text;
 using VirusTotalNet.V3;
 using VirusTotalNet.V3.Models;
-using VirusTotalNet.V3.Relationships;
 
 var apiKey = Environment.GetEnvironmentVariable("VT_API_KEY");
 if (string.IsNullOrWhiteSpace(apiKey))
@@ -68,18 +67,18 @@ Console.WriteLine("=== Relationships from an object in hand ===");
 Console.WriteLine($"Walking relationships of {file.Id} (the EICAR sample):");
 
 // Descriptor-first: (type, id) only, light on quota.
-var commentIds = await vt.Relationships.GetRelatedIdsAsync("files", file.Id, "comments");
+var commentIds = await vt.GetRelatedIdsAsync("files", file.Id, "comments");
 Console.WriteLine($"comments: {commentIds.Count} ids on this page");
 
 // Typed accessor (first page is memoized per session).
-var contacted = await file.ContactedUrlsAsync(vt.Relationships);
+var contacted = await vt.GetRelatedAsync<UrlObject>("files", file.Id, "contacted_urls");
 Console.WriteLine($"contacted_urls: {contacted.Count} on this page — first few:");
 foreach (var url in contacted.Items.Take(5))
     Console.WriteLine("  " + url.Id);
 
 // Generic fallback + paged traversal (bounded to keep the demo quota-friendly).
 var total = 0;
-await foreach (var url in vt.Relationships.TraverseAsync<UrlObject>("files", file.Id, "contacted_urls"))
+await foreach (var url in vt.TraverseRelatedAsync<UrlObject>("files", file.Id, "contacted_urls"))
 {
     total++;
     if (total >= 5)
@@ -96,7 +95,7 @@ foreach (var hit in results.Items.Take(5))
     Console.WriteLine($"  {hit.Type} / {hit.Id}");
 
 // Result-style: never throws for API errors, errors come back as VtResult.
-var lookup = await vt.Client.TryGetAsync<FileObject>("/files/definitely-not-a-real-hash");
+var lookup = await vt.TryGetAsync<FileObject>("/files/definitely-not-a-real-hash");
 if (lookup.IsSuccess)
     Console.WriteLine("File found: " + lookup.Value!.Id);
 else

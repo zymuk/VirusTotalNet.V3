@@ -904,6 +904,22 @@ public sealed class VirusTotal : IDisposable
 
     #endregion
 
+    #region Result-style (no-throw)
+
+    /// <summary>
+    /// Performs a result-style GET that never throws on API errors.
+    /// On success the deserialized object is returned in <see cref="VtResult{T}.Value"/>;
+    /// on failure the error details are in <see cref="VtResult{T}.Error"/>.
+    /// </summary>
+    /// <typeparam name="T">Expected response model (e.g. <see cref="FileObject"/>).</typeparam>
+    /// <param name="uri">Absolute or relative VT API URI (e.g. <c>/files/{hash}</c>).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public Task<VtResult<T>> TryGetAsync<T>(string uri, CancellationToken cancellationToken = default)
+        where T : class
+        => Client.TryGetAsync<T>(uri, cancellationToken);
+
+    #endregion
+
     #region VirusTotal v2 compatibility aliases
 
     /// <summary>
