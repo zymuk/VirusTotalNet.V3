@@ -344,4 +344,159 @@ public class UserFlowTests
             "urls/" + urlId,
         }, calls);
     }
+
+    [Fact]
+    public async Task ScanUrlsAsync_MultipleUrls_ScansEachLikeGenboxV2()
+    {
+        var scansSent = 0;
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            var path = PathOf(request);
+
+            if (request.Method == HttpMethod.Post && path == "urls")
+            {
+                scansSent++;
+                return StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                    "{\"data\":{\"type\":\"analysis\",\"id\":\"analysis-scanurls-" + scansSent + "\",\"attributes\":{\"status\":\"queued\"}}}");
+            }
+
+            return StubHttpMessageHandler.Json(HttpStatusCode.NotFound, """{"error":{"code":"NotFoundError"}}""");
+        });
+
+        using var vt = CreateVirusTotal(handler);
+
+        // The exact v2 batch signature: a list of URLs instead of looping manually.
+        var scans = await vt.ScanUrlsAsync(new[] { "https://example.com/a", "https://example.com/b" });
+
+        Assert.Equal(2, scans.Count);
+        Assert.Equal("analysis-scanurls-1", scans[0].Id);
+        Assert.Equal("analysis-scanurls-2", scans[1].Id);
+
+        var postUrlPaths = handler.Requests.Where(r => r.Method == HttpMethod.Post).Select(PathOf).ToArray();
+        Assert.Equal(new[] { "urls", "urls" }, postUrlPaths);
+    }
+
+    [Fact]
+    public async Task GetUrlReportsAsync_MultipleUrls_ReportsEachLikeGenboxV2()
+    {
+        var handler = new StubHttpMessageHandler(request =>
+            StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                """{"data":{"type":"url","id":"aHR0cHM6Ly9leGFtcGxlLmNvbS9h","attributes":{"url":"https://example.com/a","last_analysis_stats":{"malicious":0}}}}"""));
+
+        using var vt = CreateVirusTotal(handler);
+
+        // One v2-style batch call; each URL reports a page in order.
+        var reports = await vt.GetUrlReportsAsync(new[] { "https://example.com/a", "https://example.com/b" });
+
+        Assert.Equal(2, reports.Count);
+        Assert.Equal("https://example.com/a", reports[0].Attributes!.Url);
+
+        var calls = handler.Requests.Select(PathOf).ToArray();
+        Assert.Equal(new[]
+        {
+            "urls/aHR0cHM6Ly9leGFtcGxlLmNvbS9h",
+            "urls/aHR0cHM6Ly9leGFtcGxlLmNvbS9i",
+        }, calls);
+    }
+
+    [Fact]
+    public async Task RescanFilesAsync_ByContent_RescansEachLikeGenboxV2()
+    {
+        var bytes = EicarBytes();
+        var sha256 = Sha256Of(bytes);
+
+        var i = 0;
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            var path = PathOf(request);
+
+            if (request.Method == HttpMethod.Post && path.StartsWith("files/", StringComparison.Ordinal) && path.EndsWith("/analyse", StringComparison.Ordinal))
+            {
+                i++;
+                return StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                    "{\"data\":{\"type\":\"analysis\",\"id\":\"analysis-rescan-" + i + "\",\"attributes\":{\"status\":\"queued\"}}}");
+            }
+
+            return StubHttpMessageHandler.Json(HttpStatusCode.NotFound, """{"error":{"code":"NotFoundError"}}""");
+        });
+
+        using var vt = CreateVirusTotal(handler);
+
+        // v2 signature: pass the bytes, the hash is computed and requested per file.
+        var rescans = await vt.RescanFilesAsync(new[] { bytes, bytes });
+
+        Assert.Equal(2, rescans.Count);
+        Assert.Equal("analysis-rescan-1", rescans[0].Id);
+        Assert.Equal("analysis-rescan-2", rescans[1].Id);
+
+        var calls = handler.Requests.Select(PathOf).ToArray();
+        Assert.Equal(new[] { "files/" + sha256 + "/analyse", "files/" + sha256 + "/analyse" }, calls);
+    }
+
+    [Fact]
+    public async Task GetFileReportsAsync_ByContent_ReportsEachLikeGenboxV2()
+    {
+        var bytes = EicarBytes();
+        var sha256 = Sha256Of(bytes);
+
+        var handler = new StubHttpMessageHandler(request =>
+            StubHttpMessageHandler.Json(HttpStatusCode.OK, FileReportJson(sha256)));
+
+        using var vt = CreateVirusTotal(handler);
+
+        // v2 signature: pass the bytes, each digest is computed and requested.
+        var reports = await vt.GetFileReportsAsync(new[] { bytes, bytes });
+
+        Assert.Equal(2, reports.Count);
+        Assert.Equal(sha256, reports[0].Id);
+        Assert.Equal(5, reports[0].Attributes!.LastAnalysisStats!.Malicious);
+
+        var calls = handler.Requests.Select(PathOf).ToArray();
+        Assert.Equal(new[] { "files/" + sha256, "files/" + sha256 }, calls);
+    }
+
+    [Fact]
+    public async Task CreateCommentAsync_OnFileBytes_PostsCommentLikeGenboxV2()
+    {
+        var bytes = EicarBytes();
+        var sha256 = Sha256Of(bytes);
+
+        var handler = new StubHttpMessageHandler(request =>
+            StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                """{"data":{"type":"comment","id":"d-1","attributes":{"text":"nice sample"}}}"""));
+
+        using var vt = CreateVirusTotal(handler);
+
+        // v2 signature: comment on a file by its content.
+        var comment = await vt.CreateCommentAsync(bytes, "nice sample");
+
+        Assert.Equal("d-1", comment.Id);
+        Assert.Equal("nice sample", comment.Attributes!.Text);
+
+        var calls = handler.Requests.Select(PathOf).ToArray();
+        Assert.Equal(new[] { "files/" + sha256 + "/comments" }, calls);
+    }
+
+    [Fact]
+    public async Task GetCommentAsync_ByFileBytes_ListsCommentsLikeGenboxV2()
+    {
+        var bytes = EicarBytes();
+        var sha256 = Sha256Of(bytes);
+
+        var handler = new StubHttpMessageHandler(request =>
+            StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                """{"data":[{"type":"comment","id":"d-1","attributes":{"text":"nice sample"}},{"type":"comment","id":"d-2","attributes":{"text":"another"}}]}"""));
+
+        using var vt = CreateVirusTotal(handler);
+
+        // v2 signature: list comments of a file by its content.
+        var comments = await vt.GetCommentAsync(bytes);
+
+        Assert.Equal(2, comments.Count);
+        Assert.Equal("d-1", comments.Items[0].Id);
+        Assert.Equal("another", comments.Items[1].Attributes!.Text);
+
+        var calls = handler.Requests.Select(PathOf).ToArray();
+        Assert.Equal(new[] { "files/" + sha256 + "/comments" }, calls);
+    }
 }
