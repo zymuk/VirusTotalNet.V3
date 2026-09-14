@@ -8,7 +8,7 @@
     <AssemblyName>VirusTotalNet.V3.DependencyInjection</AssemblyName>
     <RootNamespace>VirusTotalNet.V3.DependencyInjection</RootNamespace>
     <PackageId>VirusTotalNet.V3.DependencyInjection</PackageId>
-    <Version>0.8.0-beta</Version>
+    <Version>0.8.1-beta</Version>
     <Authors>Tran T. Ngoc</Authors>
     <Description>Dependency-injection glue for VirusTotalNet.V3: AddVirusTotal extension registering the client, options and all module clients. Kept separate so the core library stays free of Microsoft.Extensions.* dependencies.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
