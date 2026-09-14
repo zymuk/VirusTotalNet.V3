@@ -1,6 +1,5 @@
 using System.Text;
 using VirusTotalNet.V3;
-using VirusTotalNet.V3.Clients;
 using VirusTotalNet.V3.Models;
 using VirusTotalNet.V3.Relationships;
 
@@ -34,39 +33,37 @@ if (args.Length == 0)
 string path = args[0];
 byte[] payload = await File.ReadAllBytesAsync(path);
 
-// 1. Upload the file and get its analysis id.
-using var upload = new MemoryStream(payload);
-var analysis = await vt.FileClient.ScanFileAsync(upload, fileName: Path.GetFileName(path));
+// 1. Scan the file straight from its path and get the analysis id.
+var analysis = await vt.ScanFileAsync(path);
 
 // 2. Wait until the analysis finishes (polls through the shared rate limiter).
-var completed = await vt.AnalysisClient.WaitForCompletionAsync(analysis.Id);
+var completed = await vt.WaitForCompletionAsync(analysis.Id);
 Console.WriteLine($"Analysis {completed.Id}: status = {completed.Attributes?.Status}");
 
 // 3. Fetch the final report by SHA-256 and show the detection stats.
 string sha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(payload)).ToLowerInvariant();
-var report = await vt.FileClient.GetFileAsync(sha256);
+var report = await vt.GetFileReportAsync(sha256);
 Console.WriteLine($"SHA-256   : {report.Id}");
 Console.WriteLine($"Malicious : {report.Attributes?.LastAnalysisStats?.Malicious}");
 
 Console.WriteLine();
-Console.WriteLine("=== M3: URLs / Domains / IPs clients ===");
+Console.WriteLine("=== URLs / Domains / IPs ===");
 
-var domains = new DomainClient(vt.Client);
-var domain = await domains.GetDomainAsync("example.com");
+var domain = await vt.GetDomainAsync("example.com");
 Console.WriteLine($"Domain: {domain.Id} (registrar: {domain.Attributes?.Registrar}, malicious: {domain.Attributes?.LastAnalysisStats?.Malicious})");
 
-var subs = await domains.GetSubdomainsAsync("example.com");
+var subs = await vt.GetDomainSubdomainsAsync("example.com");
 Console.WriteLine($"Subdomains: {subs.Count} on this page — first few:");
 foreach (var sub in subs.Items.Take(5))
     Console.WriteLine("  " + sub.Id);
 
-var resolutions = await domains.GetResolutionsAsync("example.com");
+var resolutions = await vt.GetDomainResolutionsAsync("example.com");
 Console.WriteLine($"Resolutions: {resolutions.Count} on this page — first few:");
 foreach (var res in resolutions.Items.Take(5))
     Console.WriteLine("  -> " + res.Attributes?.IpAddress);
 
 Console.WriteLine();
-Console.WriteLine("=== M4: relationships from an object in hand ===");
+Console.WriteLine("=== Relationships from an object in hand ===");
 
 Console.WriteLine($"Walking relationships of {file.Id} (the EICAR sample):");
 
@@ -91,10 +88,9 @@ await foreach (var url in vt.Relationships.TraverseAsync<UrlObject>("files", fil
 Console.WriteLine($"traversed contacted_urls: {total} items (bounded)");
 
 Console.WriteLine();
-Console.WriteLine("=== M5: intelligence search + result-style (no-throw) ===");
+Console.WriteLine("=== Intelligence search + result-style (no-throw) ===");
 
-var search = new SearchClient(vt.Client);
-var results = await search.SearchAsync("type:domain tags:phishing", descriptorsOnly: true);
+var results = await vt.SearchAsync("type:domain tags:phishing", descriptorsOnly: true);
 Console.WriteLine($"Search: {results.Count} matches on this page — first few:");
 foreach (var hit in results.Items.Take(5))
     Console.WriteLine($"  {hit.Type} / {hit.Id}");

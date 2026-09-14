@@ -19,7 +19,7 @@ public abstract class VtObject<TA> where TA : class
     /// <summary>Typed attributes; <c>null</c> when the API did not include them (e.g. relationship entries).</summary>
     public TA? Attributes { get; set; }
 
-    /// <summary>Related objects; the raw map is preserved losslessly (typed accessors arrive in M4).</summary>
+    /// <summary>Related objects; the raw map is preserved losslessly.</summary>
     public VtRelationships? Relationships { get; set; }
 
     /// <summary>Links of the object, typically a <c>self</c> URL.</summary>

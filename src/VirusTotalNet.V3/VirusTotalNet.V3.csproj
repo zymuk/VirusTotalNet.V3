@@ -13,7 +13,7 @@
     <Description>A modern .NET client for the VirusTotal API v3. Strongly-typed yet lossless, rate-limit aware, zero external dependencies on .NET 8+.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
-    <RepositoryUrl>https://github.com/zymuk/VirusTotalNetv3.git</RepositoryUrl>
+    <RepositoryUrl>https://github.com/zymuk/VirusTotalNet.V3.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageReadmeFile>README.md</PackageReadmeFile>

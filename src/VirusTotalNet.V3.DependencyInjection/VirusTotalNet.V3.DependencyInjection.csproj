@@ -13,7 +13,7 @@
     <Description>Dependency-injection glue for VirusTotalNet.V3: AddVirusTotal extension registering the client, options and all module clients. Kept separate so the core library stays free of Microsoft.Extensions.* dependencies.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
-    <RepositoryUrl>https://github.com/zymuk/VirusTotalNetv3.git</RepositoryUrl>
+    <RepositoryUrl>https://github.com/zymuk/VirusTotalNet.V3.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn.Replace(';1591', '').Replace('1591', ''))</NoWarn>

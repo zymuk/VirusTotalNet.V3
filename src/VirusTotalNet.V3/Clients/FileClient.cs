@@ -7,8 +7,8 @@ using VirusTotalNet.V3.Models;
 namespace VirusTotalNet.V3.Clients;
 
 /// <summary>
-/// Operations on <c>file</c> resources: scan a sample via multipart upload and, in later
-/// milestones, retrieve reports, rescan, and download.
+/// Operations on <c>file</c> resources: scan a sample via multipart upload, retrieve reports,
+/// rescan, and download.
 /// </summary>
 public interface IFileClient
 {
