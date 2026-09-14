@@ -48,6 +48,26 @@ public interface IFeedsClient
     Task<Stream> GetFileBehaviourFeedStreamAsync(string time, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Downloads an hourly file feed package (.tar.bz2 containing 60 per-minute batches).
+    /// </summary>
+    Task<Stream> GetFileFeedHourlyStreamAsync(string time, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Downloads an hourly URL feed package (.tar.bz2 containing 60 per-minute batches).
+    /// </summary>
+    Task<Stream> GetUrlFeedHourlyStreamAsync(string time, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Downloads an hourly domain feed package (.tar.bz2 containing 60 per-minute batches).
+    /// </summary>
+    Task<Stream> GetDomainFeedHourlyStreamAsync(string time, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Downloads an hourly IP address feed package (.tar.bz2 containing 60 per-minute batches).
+    /// </summary>
+    Task<Stream> GetIpFeedHourlyStreamAsync(string time, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Downloads an hourly file behaviour feed package (.tar.bz2 containing 60 per-minute batches).
     /// </summary>
     /// <param name="time">Batch time in <c>YYYYMMDDhh</c> UTC format.</param>
@@ -84,8 +104,24 @@ public sealed class FeedsClient : IFeedsClient
         => GetFeedStreamAsync("/feeds/file_behaviours/", time, null, cancellationToken);
 
     /// <inheritdoc />
+    public Task<Stream> GetFileFeedHourlyStreamAsync(string time, CancellationToken cancellationToken = default)
+        => GetFeedStreamAsync("/feeds/files/", time, "hourly", cancellationToken);
+
+    /// <inheritdoc />
+    public Task<Stream> GetUrlFeedHourlyStreamAsync(string time, CancellationToken cancellationToken = default)
+        => GetFeedStreamAsync("/feeds/urls/", time, "hourly", cancellationToken);
+
+    /// <inheritdoc />
+    public Task<Stream> GetDomainFeedHourlyStreamAsync(string time, CancellationToken cancellationToken = default)
+        => GetFeedStreamAsync("/feeds/domains/", time, "hourly", cancellationToken);
+
+    /// <inheritdoc />
+    public Task<Stream> GetIpFeedHourlyStreamAsync(string time, CancellationToken cancellationToken = default)
+        => GetFeedStreamAsync("/feeds/ip_addresses/", time, "hourly", cancellationToken);
+
+    /// <inheritdoc />
     public Task<Stream> GetFileBehaviourFeedHourlyStreamAsync(string time, CancellationToken cancellationToken = default)
-        => GetFeedStreamAsync("/feeds/file_behaviours/", time, "/hourly", cancellationToken);
+        => GetFeedStreamAsync("/feeds/file_behaviours/", time, "hourly", cancellationToken);
 
     private static void ValidateTime(string time)
     {
@@ -93,10 +129,10 @@ public sealed class FeedsClient : IFeedsClient
             throw new ArgumentException("Time is required.", nameof(time));
     }
 
-    private async Task<Stream> GetFeedStreamAsync(string pathPrefix, string time, string? suffix, CancellationToken cancellationToken)
+    private async Task<Stream> GetFeedStreamAsync(string pathPrefix, string time, string? hourly, CancellationToken cancellationToken)
     {
         ValidateTime(time);
-        var path = pathPrefix + Uri.EscapeDataString(time.Trim()) + suffix;
+        var path = pathPrefix + (hourly is null ? string.Empty : hourly + "/") + Uri.EscapeDataString(time.Trim());
         return await _client.GetStreamAsync(path, cancellationToken).ConfigureAwait(false);
     }
 }

@@ -115,8 +115,8 @@ public sealed class PrivateScanningClient : IPrivateScanningClient
     /// <inheritdoc />
     public async Task<string> GetPrivateFileUploadUrlAsync(CancellationToken cancellationToken = default)
     {
-        var response = await _client.GetAsync<string>("/private/files/upload_url", cancellationToken).ConfigureAwait(false);
-        return response.EnsureSuccess().Data ?? throw new InvalidOperationException("The API returned no upload URL.");
+        var url = await _client.GetRawAsync<string>("/private/files/upload_url", cancellationToken).ConfigureAwait(false);
+        return url ?? throw new InvalidOperationException("The API returned no upload URL.");
     }
 
     /// <inheritdoc />

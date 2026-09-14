@@ -107,6 +107,70 @@ public sealed class VtClient : IVtClient, IDisposable
         }
     }
 
+    /// <inheritdoc />
+    public async Task<T?> GetRawAsync<T>(string uri, CancellationToken cancellationToken = default)
+    {
+        var attempt = 0;
+        while (true)
+        {
+            await _rateLimiter.WaitUntilAllowedAsync(cancellationToken).ConfigureAwait(false);
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, BuildRelativeUri(uri));
+
+            HttpResponseMessage? response = null;
+            try
+            {
+                response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (IsRetryableNetworkError(ex) && ShouldRetry(attempt))
+            {
+                response?.Dispose();
+                await BackoffDelayAsync(attempt, retryAfter: null, cancellationToken).ConfigureAwait(false);
+                attempt++;
+                continue;
+            }
+
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await DeserializeRawAsync<T>(response, cancellationToken).ConfigureAwait(false);
+                response.Dispose();
+                return result;
+            }
+
+            if (IsRetryableStatus(response) && ShouldRetry(attempt))
+            {
+                var retryAfter = GetRetryAfter(response);
+                response.Dispose();
+                await BackoffDelayAsync(attempt, retryAfter, cancellationToken).ConfigureAwait(false);
+                attempt++;
+                continue;
+            }
+
+            var error = await MapErrorResponseAsync(response).ConfigureAwait(false);
+            response.Dispose();
+            throw error;
+        }
+    }
+
+    private static async Task<T?> DeserializeRawAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        using var stream = await ReadContentStream(response).ConfigureAwait(false);
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var payload = UnwrapData(document.RootElement);
+        var options = VirusTotalJson.CreateOptions();
+#pragma warning disable IL2026, IL3050
+        return JsonSerializer.Deserialize<T>(payload, options);
+#pragma warning restore IL2026, IL3050
+    }
+
+    private static JsonElement UnwrapData(JsonElement root)
+    {
+        var current = root;
+        while (current.ValueKind == JsonValueKind.Object && current.TryGetProperty("data", out var data))
+            current = data;
+        return current;
+    }
+
     private static async Task<VirusTotalException> MapErrorResponseAsync(HttpResponseMessage response)
     {
         try

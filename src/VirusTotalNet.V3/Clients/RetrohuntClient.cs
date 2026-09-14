@@ -52,6 +52,8 @@ public sealed class RetrohuntClient : IRetrohuntClient
     {
         if (string.IsNullOrWhiteSpace(rules))
             throw new ArgumentException("YARA rules are required.", nameof(rules));
+        if (corpus is not null && corpus is not ("main" or "goodware"))
+            throw new ArgumentException("The corpus must be either \"main\" or \"goodware\".", nameof(corpus));
 
         var response = await _client.PostAsync<RetrohuntJobObject>(JobsPath, new
         {

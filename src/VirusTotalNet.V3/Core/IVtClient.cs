@@ -30,6 +30,15 @@ public interface IVtClient
     Task<Stream> GetStreamAsync(string uri, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Performs a GET request and deserialises the raw JSON body into <typeparamref name="T"/>,
+    /// for the handful of endpoints whose payload is a bare object instead of the standard
+    /// <c>{ data, meta, links, error }</c> envelope (e.g. <c>/users/{id}/api_usage</c>).
+    /// Nested <c>data</c> fields are unwrapped so both enveloped and bare responses decode.
+    /// Retry, rate-limit and error-mapping semantics match <see cref="GetAsync{T}(string, CancellationToken)"/>.
+    /// </summary>
+    Task<T?> GetRawAsync<T>(string uri, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Performs a POST request with a JSON body and deserialises the response envelope.
     /// </summary>
     Task<VtResponse<T>> PostAsync<T>(string uri, object body, CancellationToken cancellationToken = default);

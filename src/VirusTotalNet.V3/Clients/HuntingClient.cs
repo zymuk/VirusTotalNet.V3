@@ -34,6 +34,19 @@ public interface IHuntingClient
 
     /// <summary>Retrieves a hunting notification by its id (<c>GET /intelligence/hunting_notifications/{id}</c>).</summary>
     Task<HuntingNotificationObject> GetNotificationAsync(string id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Retrieves objects from the Intelligence IoC Stream (<c>GET /ioc_stream</c>), the
+    /// replacement for the deprecated hunting-notifications feed on the web UI. Returns a
+    /// cursor-paginated collection of files/URLs/domains/IPs with their notification context.
+    /// </summary>
+    /// <param name="filter">Filter string, e.g. <c>date:2023-02-07T10:00:00+</c>, <c>origin:hunting</c>, <c>entity_type:file</c>.</param>
+    /// <param name="limit">Number of objects to retrieve (1-40; default 10).</param>
+    /// <param name="descriptorsOnly">Return only object descriptors instead of full objects.</param>
+    /// <param name="order">Sort order: <c>date-</c> (newest first, default) or <c>date+</c>.</param>
+    /// <param name="cursor">Continuation cursor.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<VtCollection<VtIocStreamObject>> GetIocStreamObjectsAsync(string? filter = null, int? limit = null, bool? descriptorsOnly = null, string? order = null, string? cursor = null, CancellationToken cancellationToken = default);
 }
 
 /// <summary><see cref="IHuntingClient"/> implementation built on top of <see cref="VtClient"/>.</summary>
@@ -54,6 +67,8 @@ public sealed class HuntingClient : IHuntingClient
             throw new ArgumentException("A ruleset name is required.", nameof(name));
         if (string.IsNullOrWhiteSpace(rules))
             throw new ArgumentException("Rules are required.", nameof(rules));
+        if (matchObjectType is not null && matchObjectType is not ("file" or "url" or "domain" or "ip"))
+            throw new ArgumentException("The match object type must be one of \"file\", \"url\", \"domain\", \"ip\".", nameof(matchObjectType));
 
         var response = await _client.PostAsync<HuntingRulesetObject>(RulesetsPath, new
         {
@@ -173,5 +188,42 @@ public sealed class HuntingClient : IHuntingClient
 
         var response = await _client.GetAsync<HuntingNotificationObject>($"{NotificationsPath}/{id}", cancellationToken).ConfigureAwait(false);
         return response.EnsureSuccess().Data ?? throw new InvalidOperationException("The API returned no hunting notification.");
+    }
+
+    /// <inheritdoc />
+    public async Task<VtCollection<VtIocStreamObject>> GetIocStreamObjectsAsync(string? filter = null, int? limit = null, bool? descriptorsOnly = null, string? order = null, string? cursor = null, CancellationToken cancellationToken = default)
+    {
+        if (limit is not null && (limit < 1 || limit > 40))
+            throw new ArgumentOutOfRangeException(nameof(limit), "The limit must be between 1 and 40.");
+        if (order is not null && order is not ("date-" or "date+"))
+            throw new ArgumentException("The order must be either \"date-\" or \"date+\".", nameof(order));
+
+        var path = "/ioc_stream";
+        var separator = "?";
+        if (filter is not null)
+        {
+            path += separator + "filter=" + Uri.EscapeDataString(filter);
+            separator = "&";
+        }
+        if (limit is not null)
+        {
+            path += separator + "limit=" + limit.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            separator = "&";
+        }
+        if (descriptorsOnly is true)
+        {
+            path += separator + "descriptors_only=true";
+            separator = "&";
+        }
+        if (order is not null)
+        {
+            path += separator + "order=" + Uri.EscapeDataString(order);
+            separator = "&";
+        }
+        if (cursor is not null)
+            path += separator + "cursor=" + Uri.EscapeDataString(cursor);
+
+        var response = await _client.GetAsync<List<VtIocStreamObject>>(path, cancellationToken).ConfigureAwait(false);
+        return VtCollection<VtIocStreamObject>.FromEnvelope(response.EnsureSuccess());
     }
 }

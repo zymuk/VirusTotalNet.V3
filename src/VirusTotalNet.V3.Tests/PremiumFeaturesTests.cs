@@ -8,6 +8,7 @@ using VirusTotalNet.V3.Clients;
 using VirusTotalNet.V3.Core;
 using VirusTotalNet.V3.Models;
 using Xunit;
+using System.Collections.Generic;
 
 namespace VirusTotalNet.V3.Tests;
 
@@ -61,7 +62,32 @@ public class FeedsClientTests
         }
 
         var request = Assert.Single(handler.Requests);
-        Assert.Equal($"https://www.virustotal.com/api/v3/feeds/file_behaviours/{Time}/hourly", request.RequestUri!.ToString());
+        Assert.Equal($"https://www.virustotal.com/api/v3/feeds/file_behaviours/hourly/{Time}", request.RequestUri!.ToString());
+    }
+
+    [Theory]
+    [InlineData("files", "GetFileFeedHourlyStreamAsync")]
+    [InlineData("urls", "GetUrlFeedHourlyStreamAsync")]
+    [InlineData("domains", "GetDomainFeedHourlyStreamAsync")]
+    [InlineData("ip_addresses", "GetIpFeedHourlyStreamAsync")]
+    [InlineData("file_behaviours", "GetFileBehaviourFeedHourlyStreamAsync")]
+    public async Task HourlyFeed_Uses_Hourly_Path(string segment, string method)
+    {
+        var handler = new StubHttpMessageHandler(_ => ClientResponse());
+        var vt = new VtClient(new VirusTotalOptions { ApiKey = "test-key" }, new HttpClient(handler));
+        var client = new FeedsClient(vt);
+
+        using var stream = method switch
+        {
+            "GetFileFeedHourlyStreamAsync" => await client.GetFileFeedHourlyStreamAsync(Time),
+            "GetUrlFeedHourlyStreamAsync" => await client.GetUrlFeedHourlyStreamAsync(Time),
+            "GetDomainFeedHourlyStreamAsync" => await client.GetDomainFeedHourlyStreamAsync(Time),
+            "GetIpFeedHourlyStreamAsync" => await client.GetIpFeedHourlyStreamAsync(Time),
+            _ => await client.GetFileBehaviourFeedHourlyStreamAsync(Time)
+        };
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal($"https://www.virustotal.com/api/v3/feeds/{segment}/hourly/{Time}", request.RequestUri!.ToString());
     }
 
     [Theory]
@@ -139,6 +165,20 @@ public class PrivateScanningClientTests
         var request = Assert.Single(handler.Requests);
         Assert.Equal(HttpMethod.Get, request.Method);
         Assert.Equal($"{PrivatePath}/private/files/upload_url", request.RequestUri!.ToString());
+    }
+
+    [Fact]
+    public async Task GetUploadUrl_Tolerates_Nested_Data_Object()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                @"{ ""data"": { ""type"": ""upload_url"", ""data"": ""https://upld.virustotal.com/user/nested-url"" } }"));
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new PrivateScanningClient(vt);
+
+        var url = await client.GetPrivateFileUploadUrlAsync();
+
+        Assert.Equal("https://upld.virustotal.com/user/nested-url", url);
     }
 
     [Fact]
@@ -281,7 +321,79 @@ public class HuntingClientTests
 
         await Assert.ThrowsAsync<ArgumentException>(() => client.CreateRulesetAsync("", "rule"));
         await Assert.ThrowsAsync<ArgumentException>(() => client.CreateRulesetAsync("name", ""));
+        await Assert.ThrowsAsync<ArgumentException>(() => client.CreateRulesetAsync("name", "rule", matchObjectType: "process"));
+        Assert.Empty(handler.Requests);
     }
+
+    [Fact]
+    public async Task CreateRuleset_Posts_Match_Object_Type_Literal()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK, RulesetJson("ruleset-1")));
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new HuntingClient(vt);
+
+        await client.CreateRulesetAsync("my-rule", "rule demo { condition: true }", matchObjectType: "domain", notificationEmails: new() { "a@b.com" });
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Contains("match_object_type", handler.LastRequestBody!);
+        Assert.Contains("domain", handler.LastRequestBody!);
+        Assert.Contains("notification_emails", handler.LastRequestBody!);
+        Assert.Contains("a@b.com", handler.LastRequestBody!);
+    }
+
+    [Fact]
+    public async Task IocStream_Returns_Collection_With_Context()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK, IocStreamJson()));
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new HuntingClient(vt);
+
+        var items = await client.GetIocStreamObjectsAsync(filter: "origin:hunting", limit: 5, descriptorsOnly: true, order: "date+", cursor: "cur9");
+
+        Assert.Single(items!.Items);
+        var item = items.Items[0];
+        Assert.Equal("file", item.Type);
+        Assert.Equal("c9c4ee34d9c9f769f884f720e1d37ce1e864aae1be81a4a274bb1a88704cb11c", item.Id);
+        Assert.Equal("9047905968", item.ContextAttributes!.NotificationId);
+        Assert.Equal("hunting", item.ContextAttributes.Origin);
+        Assert.Equal("vulnerability_weaponization", item.ContextAttributes.HuntingInfo!.RuleName);
+        Assert.Equal("hunting_ruleset", item.ContextAttributes.Sources![0].Type);
+        Assert.Equal("Ransomware", item.ContextAttributes.Sources[0].Label);
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal($"{Base}/ioc_stream?filter=origin%3Ahunting&limit=5&descriptors_only=true&order=date%2B&cursor=cur9", request.RequestUri!.ToString());
+    }
+
+    [Fact]
+    public async Task IocStream_Validates_Limit_And_Order()
+    {
+        var handler = new StubHttpMessageHandler(StubHttpMessageHandler.Json(HttpStatusCode.OK, @"{ ""data"": [] }"));
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new HuntingClient(vt);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => client.GetIocStreamObjectsAsync(limit: 0));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => client.GetIocStreamObjectsAsync(limit: 41));
+        await Assert.ThrowsAsync<ArgumentException>(() => client.GetIocStreamObjectsAsync(order: "date"));
+        Assert.Empty(handler.Requests);
+    }
+
+    private static string IocStreamJson() => @"{
+        ""meta"": { ""cursor"": ""cur0"" },
+        ""data"": [
+          { ""type"": ""file"", ""id"": ""c9c4ee34d9c9f769f884f720e1d37ce1e864aae1be81a4a274bb1a88704cb11c"",
+            ""context_attributes"": {
+              ""notification_id"": ""9047905968"",
+              ""origin"": ""hunting"",
+              ""hunting_info"": { ""rule_name"": ""vulnerability_weaponization"" },
+              ""tags"": [ ""ransomware"" ],
+              ""sources"": [ { ""type"": ""hunting_ruleset"", ""id"": ""7926136120"", ""label"": ""Ransomware"" } ],
+              ""notification_date"": 1675778611
+            } }
+        ],
+        ""links"": { ""self"": ""https://www.virustotal.com/api/v3/ioc_stream"" }
+    }".Replace("'", "\"");
 
     [Fact]
     public async Task ListRulesets_Includes_Query_Parameters()
@@ -428,6 +540,30 @@ public class RetrohuntClientTests
         var client = new RetrohuntClient(vt);
 
         await Assert.ThrowsAsync<ArgumentException>(() => client.CreateJobAsync(""));
+    }
+
+    [Fact]
+    public async Task CreateJob_Validates_Corpus()
+    {
+        var handler = new StubHttpMessageHandler(StubHttpMessageHandler.Json(HttpStatusCode.OK, JobJson()));
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new RetrohuntClient(vt);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => client.CreateJobAsync("rule x { condition: true }", corpus: "evil_corpus"));
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task CreateJob_Accepts_Goodware_Corpus()
+    {
+        var handler = new StubHttpMessageHandler(StubHttpMessageHandler.Json(HttpStatusCode.OK, JobJson("retro-2")));
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new RetrohuntClient(vt);
+
+        await client.CreateJobAsync("rule x { condition: true }", corpus: "goodware");
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Contains("goodware", handler.LastRequestBody!);
     }
 
     [Fact]
@@ -620,19 +756,78 @@ public class UsersClientTests
     }
 
     [Fact]
-    public async Task AddUserToGroup_Posts_Membership()
+    public async Task AddUserToGroup_Posts_Relationship_Membership()
     {
-        var handler = new StubHttpMessageHandler(StubHttpMessageHandler.Json(HttpStatusCode.OK, UserJson("user-1")));
+        var handler = new StubHttpMessageHandler(StubHttpMessageHandler.Json(HttpStatusCode.OK, @"{ }"));
         using var vt = new VtClient(Options(), new HttpClient(handler));
         var client = new UsersClient(vt);
 
-        var user = await client.AddUserToGroupAsync("group-1", "user-1", "admin");
+        await client.AddUserToGroupAsync("group-1", "alice@example.com");
 
-        Assert.Equal("user-1", user!.Id);
         var request = Assert.Single(handler.Requests);
         Assert.Equal(HttpMethod.Post, request.Method);
-        Assert.Equal($"{Base}/groups/group-1/users", request.RequestUri!.ToString());
-        Assert.Contains("admin", handler.LastRequestBody!);
+        Assert.Equal($"{Base}/groups/group-1/relationships/users", request.RequestUri!.ToString());
+        Assert.Contains("alice@example.com", handler.LastRequestBody!);
+        Assert.Contains("user", handler.LastRequestBody!);
+        Assert.DoesNotContain("privileges", handler.LastRequestBody!);
+    }
+
+    [Fact]
+    public async Task AddUserToGroup_Requires_Email()
+    {
+        var handler = new StubHttpMessageHandler(StubHttpMessageHandler.Json(HttpStatusCode.OK, @"{ }"));
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new UsersClient(vt);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => client.AddUserToGroupAsync("group-1", ""));
+        await Assert.ThrowsAsync<ArgumentException>(() => client.AddUserToGroupAsync("", "alice@example.com"));
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task SetGroupUserRoles_Patches_With_Validated_Roles()
+    {
+        var handler = new StubHttpMessageHandler(StubHttpMessageHandler.Json(HttpStatusCode.OK, @"{ }"));
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new UsersClient(vt);
+
+        await client.SetGroupUserRolesAsync("group-1", "alice", new[] { GroupRoles.GroupAdmin });
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(new HttpMethod("PATCH"), request.Method);
+        Assert.Equal($"{Base}/groups/group-1/relationships/users", request.RequestUri!.ToString());
+        Assert.Contains("context_attributes", handler.LastRequestBody!);
+        Assert.Contains("roles", handler.LastRequestBody!);
+        Assert.Contains(GroupRoles.GroupAdmin, handler.LastRequestBody!);
+    }
+
+    [Fact]
+    public async Task GroupRoles_Use_Add_And_Remove_Operations()
+    {
+        var handler = new StubHttpMessageHandler(_ => StubHttpMessageHandler.Json(HttpStatusCode.OK, @"{ }"));
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new UsersClient(vt);
+
+        await client.AddGroupUserRolesAsync("group-1", "alice", new[] { GroupRoles.PrivateScanning });
+        Assert.Contains("add_roles", handler.LastRequestBody!);
+        Assert.Contains(GroupRoles.PrivateScanning, handler.LastRequestBody!);
+
+        handler.Requests.Clear();
+        await client.RemoveGroupUserRolesAsync("group-1", "alice", new[] { GroupRoles.PrivateScanning });
+        Assert.Contains("remove_roles", handler.LastRequestBody!);
+        Assert.Contains(GroupRoles.PrivateScanning, handler.LastRequestBody!);
+    }
+
+    [Fact]
+    public async Task GroupRoles_Rejects_Unknown_Role()
+    {
+        var handler = new StubHttpMessageHandler(StubHttpMessageHandler.Json(HttpStatusCode.OK, @"{ }"));
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new UsersClient(vt);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => client.SetGroupUserRolesAsync("group-1", "alice", new[] { "full_admin" }));
+        await Assert.ThrowsAsync<ArgumentException>(() => client.AddGroupUserRolesAsync("group-1", "alice", new List<string>()));
+        Assert.Empty(handler.Requests);
     }
 
     [Fact]
@@ -646,8 +841,55 @@ public class UsersClientTests
 
         var request = Assert.Single(handler.Requests);
         Assert.Equal(HttpMethod.Delete, request.Method);
-        Assert.Equal($"{Base}/groups/group-1/users/user-1", request.RequestUri!.ToString());
+        Assert.Equal($"{Base}/groups/group-1/relationships/users/user-1", request.RequestUri!.ToString());
     }
+
+    [Fact]
+    public async Task GetUserApiUsage_Parses_Bare_Payload()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK, ApiUsageJson()));
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new UsersClient(vt);
+
+        var usage = await client.GetUserApiUsageAsync("alice");
+
+        Assert.Equal(2, usage!.Total!["/api/v3/(intelligence_search)"]);
+        Assert.Contains("/api/v3/(files)", usage.TotalEndpointsNotConsumingQuota!.Keys);
+        Assert.Equal(1, usage.Daily!["2019-10-23"]["/api/v3/(file_behaviours)"]);
+        Assert.Equal(2, usage.DailyEndpointsNotConsumingQuota!["2019-10-30"]["/api/v3/(url_submission)"]);
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal($"{Base}/users/alice/api_usage", request.RequestUri!.ToString());
+    }
+
+    [Fact]
+    public async Task GetUserApiUsage_Adds_Date_Range_And_Accepts_Envelope()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                @" { ""data"": { ""total"": { ""/api/v3/(urls)"": 9 } } }"));
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new UsersClient(vt);
+
+        var usage = await client.GetUserApiUsageAsync("alice", startDate: "20260910", endDate: "20260911");
+
+        Assert.Equal(9, usage!.Total!["/api/v3/(urls)"]);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal($"{Base}/users/alice/api_usage?start_date=20260910&end_date=20260911", request.RequestUri!.ToString());
+    }
+
+    private static string ApiUsageJson() => @"{
+        ""daily"": {
+          ""2019-10-23"": { ""/api/v3/(file_behaviours)"": 1 },
+          ""2019-10-30"": { ""/api/v3/(url_submission)"": 1 }
+        },
+        ""daily_endpoints_not_consuming_quota"": {
+          ""2019-10-30"": { ""/api/v3/(url_submission)"": 2 }
+        },
+        ""total"": { ""/api/v3/(intelligence_search)"": 2 },
+        ""total_endpoints_not_consuming_quota"": { ""/api/v3/(files)"": 3 }
+    }".Replace("'", "\"");
 
     private static VirusTotalOptions Options(string key = "test-key") => new() { ApiKey = key };
 }
