@@ -16,6 +16,7 @@ public sealed class RateLimiter
     private readonly int _maxPerMinute;
     private readonly int _maxPerDay;
     private readonly Func<DateTimeOffset> _clock;
+    private readonly object _sync = new();
 
     /// <summary>
     /// Default clock used when no clock is injected. Tests should inject a per-instance clock instead.
@@ -45,25 +46,30 @@ public sealed class RateLimiter
     {
         while (true)
         {
-            var now = Now;
-            PurgeExpired(_minuteTimestamps, now, TimeSpan.FromMinutes(1));
-            PurgeExpired(_dayTimestamps, now, TimeSpan.FromDays(1));
+            TimeSpan wait;
 
-            var waitMinute = _minuteTimestamps.Count >= _maxPerMinute
-                ? OldestWait(_minuteTimestamps, now, TimeSpan.FromMinutes(1))
-                : TimeSpan.Zero;
-
-            var waitDay = _dayTimestamps.Count >= _maxPerDay
-                ? OldestWait(_dayTimestamps, now, TimeSpan.FromDays(1))
-                : TimeSpan.Zero;
-
-            var wait = waitMinute > waitDay ? waitMinute : waitDay;
-
-            if (wait <= TimeSpan.Zero)
+            lock (_sync)
             {
-                _minuteTimestamps.Enqueue(now);
-                _dayTimestamps.Enqueue(now);
-                return;
+                var now = Now;
+                PurgeExpired(_minuteTimestamps, now, TimeSpan.FromMinutes(1));
+                PurgeExpired(_dayTimestamps, now, TimeSpan.FromDays(1));
+
+                var waitMinute = _minuteTimestamps.Count >= _maxPerMinute
+                    ? OldestWait(_minuteTimestamps, now, TimeSpan.FromMinutes(1))
+                    : TimeSpan.Zero;
+
+                var waitDay = _dayTimestamps.Count >= _maxPerDay
+                    ? OldestWait(_dayTimestamps, now, TimeSpan.FromDays(1))
+                    : TimeSpan.Zero;
+
+                wait = waitMinute > waitDay ? waitMinute : waitDay;
+
+                if (wait <= TimeSpan.Zero)
+                {
+                    _minuteTimestamps.Enqueue(now);
+                    _dayTimestamps.Enqueue(now);
+                    return;
+                }
             }
 
             await Task.Delay(wait, cancellationToken).ConfigureAwait(false);

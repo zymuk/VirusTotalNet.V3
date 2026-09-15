@@ -309,6 +309,36 @@ public class ErrorHandlingTests
         Assert.Equal(2, handler.Requests.Count);
     }
 
+    [Fact]
+    public async Task GetStreamAsync_Cancel_PropagatesOperationCanceled_WhenRetryDisabled()
+    {
+        var handler = new SlowHandler(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource();
+        using var client = CreateClient(handler, o =>
+        {
+            o.UseRetry = false;
+            o.MaxRetries = 0;
+            o.InitialRetryDelay = TimeSpan.FromMilliseconds(1);
+        });
+
+        var task = client.GetStreamAsync("files/abc", cts.Token);
+        cts.CancelAfter(TimeSpan.FromMilliseconds(50));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+        Assert.Equal(1, handler.Requests);
+    }
+
+    [Fact]
+    public async Task Get_TruncatedJson_ThrowsJsonException()
+    {
+        var full = "{ \"data\": { \"id\": \"abc\", \"type\": \"file\", \"attributes\": { \"sha256\": \"abcdef0123456789\" } }, \"meta\": { \"count\": 1 } }";
+        var truncated = full.Substring(0, full.Length / 2);
+        var handler = new StubHttpMessageHandler(StubHttpMessageHandler.Json(HttpStatusCode.OK, truncated));
+        using var client = CreateClient(handler);
+
+        await Assert.ThrowsAnyAsync<JsonException>(() => client.GetAsync<TestFileObject>("files/abc"));
+    }
+
     // ---- helpers ---------------------------------------------------------
 
     private static VtClient CreateClient(HttpMessageHandler handler, Action<VirusTotalOptions>? configure = null)

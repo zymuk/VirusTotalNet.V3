@@ -81,6 +81,11 @@ public sealed class VtClient : IVtClient, IDisposable
             {
                 response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                response?.Dispose();
+                throw;
+            }
             catch (Exception ex) when (IsRetryableNetworkError(ex) && ShouldRetry(attempt))
             {
                 response?.Dispose();
@@ -127,6 +132,11 @@ public sealed class VtClient : IVtClient, IDisposable
             try
             {
                 response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                response?.Dispose();
+                throw;
             }
             catch (Exception ex) when (IsRetryableNetworkError(ex) && ShouldRetry(attempt))
             {
@@ -702,13 +712,70 @@ public sealed class VtClient : IVtClient, IDisposable
         return response.Content?.Headers.ContentLength == 0;
     }
 
-    private static Uri BuildRelativeUri(string uri)
+private static Uri BuildRelativeUri(string uri)
     {
         if (Uri.TryCreate(uri, UriKind.Absolute, out var absolute))
             return absolute;
 
         var trimmed = uri.StartsWith("/", StringComparison.Ordinal) ? uri.Substring(1) : uri;
-        return new Uri(trimmed, UriKind.Relative);
+
+        var queryIndex = trimmed.IndexOf('?');
+        var path = queryIndex >= 0 ? trimmed.Substring(0, queryIndex) : trimmed;
+        var query = queryIndex >= 0 ? trimmed.Substring(queryIndex) : string.Empty;
+
+        var segments = path.Split('/');
+        for (var i = 0; i < segments.Length; i++)
+            segments[i] = EncodePathSegment(segments[i]);
+
+        var combined = string.Join("/", segments) + query;
+        if (!Uri.TryCreate(combined, UriKind.Relative, out var relative))
+            throw new InvalidOperationException($"Failed to create relative URI from '{combined}'");
+        return relative;
+    }
+
+    /// <summary>
+    /// Percent-encodes every character of a path segment that is not unreserved
+    /// (RFC 3986), while preserving already-encoded <c>%XX</c> escapes. This keeps
+    /// ids containing spaces, unicode or query metacharacters from corrupting the path.
+    /// </summary>
+    private static string EncodePathSegment(string segment)
+    {
+        var sb = new StringBuilder(segment.Length + 8);
+        var unsafeRun = -1;
+
+        for (var i = 0; i < segment.Length; i++)
+        {
+            var c = segment[i];
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+                || c is '-' or '.' or '_' or '~')
+            {
+                if (unsafeRun >= 0)
+                {
+                    sb.Append(Uri.EscapeDataString(segment.Substring(unsafeRun, i - unsafeRun)));
+                    unsafeRun = -1;
+                }
+                sb.Append(c);
+            }
+            else if (c == '%' && i + 2 < segment.Length && Uri.IsHexDigit(segment[i + 1]) && Uri.IsHexDigit(segment[i + 2]))
+            {
+                if (unsafeRun >= 0)
+                {
+                    sb.Append(Uri.EscapeDataString(segment.Substring(unsafeRun, i - unsafeRun)));
+                    unsafeRun = -1;
+                }
+                sb.Append(c).Append(segment[i + 1]).Append(segment[i + 2]);
+                i += 2;
+            }
+            else if (unsafeRun < 0)
+            {
+                unsafeRun = i;
+            }
+        }
+
+        if (unsafeRun >= 0)
+            sb.Append(Uri.EscapeDataString(segment.Substring(unsafeRun)));
+
+        return sb.ToString();
     }
 
     /// <summary>Releases the underlying <see cref="HttpClient"/> when this instance created it.</summary>
