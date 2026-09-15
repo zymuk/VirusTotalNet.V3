@@ -88,6 +88,12 @@ public sealed class VtClient : IVtClient, IDisposable
                 attempt++;
                 continue;
             }
+            catch (Exception ex) when (IsRetryableNetworkError(ex))
+            {
+                response?.Dispose();
+                throw new VtNetworkException(
+                    $"The request failed after {attempt + 1} attempt(s) due to a network error or timeout.", ex);
+            }
 
             if (response.IsSuccessStatusCode)
                 return await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
@@ -128,6 +134,12 @@ public sealed class VtClient : IVtClient, IDisposable
                 await BackoffDelayAsync(attempt, retryAfter: null, cancellationToken).ConfigureAwait(false);
                 attempt++;
                 continue;
+            }
+            catch (Exception ex) when (IsRetryableNetworkError(ex))
+            {
+                response?.Dispose();
+                throw new VtNetworkException(
+                    $"The request failed after {attempt + 1} attempt(s) due to a network error or timeout.", ex);
             }
 
             if (response.IsSuccessStatusCode)
@@ -359,12 +371,23 @@ public sealed class VtClient : IVtClient, IDisposable
                 attempt++;
                 continue;
             }
+            catch (Exception ex) when (IsRetryableNetworkError(ex))
+            {
+                response?.Dispose();
+                return VtResult<T>.Failure(NetworkError(ex, attempt + 1));
+            }
 
             if (IsSuccessWithRetry(response))
             {
+                if (IsEmptyResponse(response))
+                {
+                    response.Dispose();
+                    return VtResult<T>.Success(default);
+                }
+
                 var result = await TryDeserializeAsync<T>(response, cancellationToken).ConfigureAwait(false);
                 response.Dispose();
-                return result ?? VtResult<T>.Success(default);
+                return result;
             }
 
             if (IsRetryableStatus(response) && ShouldRetry(attempt))
@@ -382,22 +405,43 @@ public sealed class VtClient : IVtClient, IDisposable
         }
     }
 
-    private async Task<VtResult<T>?> TryDeserializeAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)
+    private static VtError NetworkError(Exception inner, int attempts)
+        => new()
+        {
+            Code = "NetworkError",
+            Message = $"The request failed after {attempts} attempt(s) due to a network error or timeout.",
+            Detail = inner.Message
+        };
+
+    private static async Task<VtResult<T>> TryDeserializeAsync<T>(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         try
         {
             var stream = await ReadContentStream(response).ConfigureAwait(false);
             var envelope = await DeserializeAsync<T>(stream, cancellationToken).ConfigureAwait(false);
             if (envelope is null)
-                return null;
+                return VtResult<T>.Success(default);
 
             if (envelope.Error != null)
                 envelope.Error.StatusCode ??= response.StatusCode;
             return VtResult<T>.From(envelope);
         }
-        catch
+        catch (JsonException)
         {
-            return null;
+            return VtResult<T>.Failure(new VtError
+            {
+                StatusCode = response.StatusCode,
+                Code = "MalformedResponseError",
+                Message = "The API returned a malformed JSON body.",
+            });
+        }
+        catch (Exception)
+        {
+            return VtResult<T>.Failure(new VtError
+            {
+                StatusCode = response.StatusCode,
+                Message = "Failed to read the API response body.",
+            });
         }
     }
 
@@ -451,6 +495,12 @@ public sealed class VtClient : IVtClient, IDisposable
                 await BackoffDelayAsync(attempt, retryAfter: null, cancellationToken).ConfigureAwait(false);
                 attempt++;
                 continue;
+            }
+            catch (Exception ex) when (IsRetryableNetworkError(ex))
+            {
+                response?.Dispose();
+                throw new VtNetworkException(
+                    $"The request failed after {attempt + 1} attempt(s) due to a network error or timeout.", ex);
             }
 
             if (IsSuccessWithRetry(response))

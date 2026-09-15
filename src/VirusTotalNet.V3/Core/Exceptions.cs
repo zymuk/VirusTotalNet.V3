@@ -91,3 +91,16 @@ public class RateLimitException : VtHttpException
     public RateLimitException(string message, TimeSpan? retryAfter = null, string? errorCode = "RateLimitExceededError")
         : base((HttpStatusCode)429, message, errorCode) => RetryAfter = retryAfter;
 }
+
+/// <summary>
+/// Exception thrown when a request fails at the transport layer (network error or timeout) after all
+/// configured retries. It carries no HTTP status because the server was never reached.
+/// </summary>
+public class VtNetworkException : VirusTotalException
+{
+    /// <summary>Creates a network exception wrapping the underlying transport failure.</summary>
+    public VtNetworkException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}
