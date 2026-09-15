@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <AssemblyName>CompatConsumer</AssemblyName>
+    <RootNamespace>CompatConsumer</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\VirusTotalNet.V3\VirusTotalNet.V3.csproj" />
+  </ItemGroup>
+</Project>
