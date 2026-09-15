@@ -8,6 +8,7 @@ using VirusTotalNet.V3.Tests.TestInternals;
 using VirusTotalNet.V3.Clients;
 using VirusTotalNet.V3.Core;
 using VirusTotalNet.V3.Models;
+using VirusTotalNet.V3.Models.Attributes;
 
 namespace VirusTotalNet.V3.Tests;
 
@@ -197,6 +198,93 @@ Assert.Contains("name=file", handler.LastRequestBody);
         Assert.Equal("d41d8cd9", file.Md5);
         Assert.Equal("abc123", file.Sha256);
         Assert.Equal(new[] { "setup.exe", "installer.exe" }, file.Names);
+    }
+
+    [Fact]
+    public async Task ScanFile_AlreadyKnownFile_ReturnsCompletedAnalysisWithStats()
+    {
+        const string json = """
+            {
+              "data": {
+                "type": "analysis",
+                "id": "analysis-known",
+                "attributes": {
+                  "status": "completed",
+                  "date": 1704067200,
+                  "stats": { "malicious": 6, "harmless": 40, "undetected": 0, "suspicious": 0, "type-unsupported": 0, "timeout": 0 }
+                }
+              }
+            }
+            """;
+
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK, json));
+
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new FileClient(vt);
+
+        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("already-known-bytes"));
+        var analysis = await client.ScanFileAsync(stream, "known.exe");
+
+        Assert.NotNull(analysis.Attributes);
+        Assert.Equal(AnalysisStatus.Completed, analysis.Attributes!.Status);
+        Assert.NotNull(analysis.Attributes.Stats);
+        Assert.Equal(6, analysis.Attributes.Stats!.Malicious);
+    }
+
+    [Fact]
+    public async Task ScanFile_QueuedAnalysis_HasNoStatsUntilCompleted()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                """{ "data": { "type": "analysis", "id": "analysis-5", "attributes": { "status": "queued" } } }"""));
+
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new FileClient(vt);
+
+        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("new-unique-bytes"));
+        var analysis = await client.ScanFileAsync(stream, "new.bin");
+
+        Assert.Equal(AnalysisStatus.Queued, analysis.Attributes!.Status);
+        Assert.Null(analysis.Attributes.Stats);
+        Assert.Null(analysis.Attributes.Results);
+    }
+
+    [Fact]
+    public async Task ScanFile_InProgressAnalysis_KeepsPendingStatus()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                """{ "data": { "type": "analysis", "id": "analysis-6", "attributes": { "status": "in-progress" } } }"""));
+
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new FileClient(vt);
+
+        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("pending-bytes"));
+        var analysis = await client.ScanFileAsync(stream, "pending.bin");
+
+        Assert.Equal(AnalysisStatus.InProgress, analysis.Attributes!.Status);
+        Assert.Null(analysis.Attributes.Stats);
+    }
+
+    [Fact]
+    public async Task ScanFile_CopiesRemainingBytes_FromCurrentStreamPosition()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                """{ "data": { "type": "analysis", "id": "analysis-pos" } }"""));
+
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new FileClient(vt);
+
+        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("prefix-middle-suffix"));
+        stream.Position = 7;
+
+        var analysis = await client.ScanFileAsync(stream, "pos.bin");
+
+        Assert.Equal("analysis-pos", analysis!.Id);
+        Assert.Contains("middle-suffix", handler.LastRequestBody);
+        Assert.DoesNotContain("prefix-", handler.LastRequestBody);
     }
 
     [Fact]
@@ -418,6 +506,22 @@ Assert.Contains("name=file", handler.LastRequestBody);
     }
 
     [Fact]
+    public async Task AnalyseFile_ConcurrentRescanRefused_MapsToHttpException()
+    {
+        var handler = new StubHttpMessageHandler(
+            StubHttpMessageHandler.Json(HttpStatusCode.UnprocessableEntity,
+                """{ "error": { "message": "Already being submitted for scanning" } }"""));
+
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new FileClient(vt);
+
+        var ex = await Assert.ThrowsAsync<VtHttpException>(() => client.AnalyseFileAsync("hash123"));
+
+        Assert.Contains("Already being submitted for scanning", ex.Message);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, ex.StatusCode);
+    }
+
+    [Fact]
     public async Task AnalyseFile_EmptyId_Throws()
     {
         var handler = new StubHttpMessageHandler(
@@ -561,6 +665,34 @@ Assert.Contains("name=file", handler.LastRequestBody);
 
         await Assert.ThrowsAsync<ArgumentNullException>(
             () => client.ScanLargeFileAsync(null!, "big.rar"));
+    }
+
+    [Fact]
+    public async Task ScanLargeFile_AcceptsStreamBeyondDirectUploadLimit()
+    {
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            if (request.Method == HttpMethod.Get)
+                return StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                    """{ "data": "https://upload.example.com/uploads/big" }""");
+
+            return StubHttpMessageHandler.Json(HttpStatusCode.OK,
+                """{ "data": { "type": "analysis", "id": "analysis-large" } }""");
+        });
+
+        using var vt = new VtClient(Options(), new HttpClient(handler));
+        var client = new FileClient(vt);
+
+        await using var stream = new MemoryStream(new byte[FileClient.MaxScanSize + 1]);
+        var analysis = await client.ScanLargeFileAsync(stream, "over-limit.bin");
+
+        Assert.Equal("analysis-large", analysis!.Id);
+
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal(HttpMethod.Get, handler.Requests[0].Method);
+        Assert.Equal(HttpMethod.Post, handler.Requests[1].Method);
+        Assert.Equal("https://upload.example.com/uploads/big", handler.Requests[1].RequestUri!.ToString());
+        Assert.Contains("filename=over-limit.bin", handler.LastRequestBody!);
     }
 
     private sealed class NonSeekableMemoryStream : MemoryStream

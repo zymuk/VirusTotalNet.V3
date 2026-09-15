@@ -177,6 +177,110 @@ public class FileIntegrationTests
         Assert.False(string.IsNullOrWhiteSpace(analysis.Id));
     }
 
+    [SkippableFact]
+    public async Task AnalyseFile_RescanFreshlyScannedFile_Completes()
+    {
+        TestKey.SkipIfUnavailable();
+
+        using var vt = new VirusTotal(TestKey.CreateOptions());
+
+        // Scan a fresh unique payload first so the rescan target is a hash we own and that is
+        // not contended by other concurrent analyses (VirusTotal rejects a rescan with
+        // "Already being submitted for scanning" while another analysis of the file is queued).
+        var payload = NewUniquePayload();
+        await using (var stream = new MemoryStream(payload, writable: false))
+        {
+            var first = await vt.ScanFileAsync(stream, "rescan-target.bin");
+            Assert.False(string.IsNullOrWhiteSpace(first?.Id));
+            await vt.WaitForCompletionAsync(first!.Id!, TimeSpan.FromSeconds(5));
+        }
+
+        var sha256 = Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant();
+        var analysis = await ScanWithTransientRetryAsync(() => vt.AnalyseFileAsync(sha256));
+        Assert.NotNull(analysis);
+        Assert.Equal("analysis", analysis!.Type);
+        Assert.False(string.IsNullOrWhiteSpace(analysis.Id));
+
+        var completed = await vt.WaitForCompletionAsync(analysis.Id!, TimeSpan.FromSeconds(5));
+        Assert.NotNull(completed);
+        Assert.Equal(AnalysisStatus.Completed, completed!.Attributes?.Status);
+        Assert.NotNull(completed.Attributes?.Stats);
+    }
+
+    [SkippableFact]
+    public async Task ScanFile_DuplicateUpload_ReturnsUsableAnalysis()
+    {
+        TestKey.SkipIfUnavailable();
+
+        using var vt = new VirusTotal(TestKey.CreateOptions());
+
+        var payload = NewUniquePayload();
+        var sha256 = Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant();
+
+        // First scan of a unique payload: it must run a fresh analysis that completes.
+        await using (var firstStream = new MemoryStream(payload, writable: false))
+        {
+            var first = await vt.ScanFileAsync(firstStream, "dup-first.bin");
+            Assert.False(string.IsNullOrWhiteSpace(first?.Id));
+            await vt.WaitForCompletionAsync(first!.Id!, TimeSpan.FromSeconds(5));
+        }
+
+        // The hash is now known: re-uploading the identical bytes must return an analysis that
+        // completes and a file report already carrying detection statistics.
+        await using (var secondStream = new MemoryStream(payload, writable: false))
+        {
+            var second = await vt.ScanFileAsync(secondStream, "dup-second.bin");
+            Assert.False(string.IsNullOrWhiteSpace(second?.Id));
+
+            var completed = await vt.WaitForCompletionAsync(second!.Id!, TimeSpan.FromSeconds(5));
+            Assert.Equal(AnalysisStatus.Completed, completed!.Attributes?.Status);
+        }
+
+        var report = await vt.GetFileReportAsync(sha256);
+        Assert.NotNull(report);
+        Assert.NotNull(report!.Attributes!.LastAnalysisStats);
+    }
+
+    [SkippableFact]
+    public async Task GetFileReport_ByMd5AndSha1_ResolvesSameFile()
+    {
+        TestKey.SkipIfUnavailable();
+
+        using var vt = new VirusTotal(TestKey.CreateOptions());
+
+        var md5 = Convert.ToHexString(MD5.HashData(Encoding.ASCII.GetBytes(EicarContent))).ToLowerInvariant();
+        var sha1 = Convert.ToHexString(SHA1.HashData(Encoding.ASCII.GetBytes(EicarContent))).ToLowerInvariant();
+
+        var byMd5 = await vt.GetFileReportAsync(md5);
+        var bySha1 = await vt.GetFileReportAsync(sha1);
+
+        Assert.Equal(EicarSha256, byMd5!.Id, ignoreCase: true);
+        Assert.Equal(EicarSha256, bySha1!.Id, ignoreCase: true);
+        Assert.NotNull(byMd5.Attributes!.LastAnalysisStats);
+        Assert.NotNull(bySha1.Attributes!.LastAnalysisStats);
+    }
+
+    /// <summary>
+    /// Runs an analyse/scan call, retrying up to a few times when VirusTotal rejects it with
+    /// "Already being submitted for scanning" — a transient state while a previous analysis of the
+    /// same file is still draining.
+    /// </summary>
+    private static async Task<AnalysisObject> ScanWithTransientRetryAsync(Func<Task<AnalysisObject>> call)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await call().ConfigureAwait(false);
+            }
+            catch (VtHttpException ex) when (
+                ex.Message.Contains("Already being submitted", StringComparison.OrdinalIgnoreCase) && attempt < 6)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+            }
+        }
+    }
+
     private static string RandomSha256()
         => Convert.ToHexString(SHA256.HashData(RandomNumberGenerator.GetBytes(64))).ToLowerInvariant();
 
