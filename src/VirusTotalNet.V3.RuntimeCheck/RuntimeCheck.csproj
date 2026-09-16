@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <AssemblyName>RuntimeCheck</AssemblyName>
+    <RootNamespace>RuntimeCheck</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="VirusTotalNet.V3">
+      <HintPath>..\VirusTotalNet.V3\bin\$(Configuration)\netstandard2.0\VirusTotalNet.V3.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>
