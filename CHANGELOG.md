@@ -7,35 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-16
+
+First stable release, published to NuGet.
+
 ### Added
-- Premium/private features: FeedsClient, PrivateScanningClient, HuntingClient, RetrohuntClient, UsersClient, GroupsClient
-- SavedSearchClient, ThreatActorClient, CollectionClient, GraphClient, BehaviourClient
-- DI integration: `VirusTotalNet.V3.DependencyInjection` package with `AddVirusTotal()`
-- ReportGenerator console tool for batch file scanning with HTML output
-- Facade `VirusTotal` Genbox-style with ~90 methods covering all 18 clients
-- v2-compat alias layer in `VirusTotal.V2Compat.cs` for migration assistance
-- File state tracking: upload-size limits, check-already-scanned via TryGetAsync
-- Error handling edge cases: malformed JSON → VtResult.Failure, network errors → VtNetworkException
-- BuildRelativeUri path encoding for special characters
-- RateLimiter atomic check-enqueue for concurrent request limiting
+- netstandard2.0 compatibility verification: `VirusTotalNet.V3.CompatConsumer` consumer library and API-surface checks
+- `CHANGELOG.md` + `MIGRATING_FROM_V2.md` (v2 → v3 migration guide)
+- Error handling edge cases (#5):
+  - `VtNetworkException` for network/timeout failures past retry
+  - Malformed/empty success bodies → `JsonException` (throwing) or `VtResult.Failure` (Try*)
+  - `TryDeserializeAsync` no longer returns `Success(default)` on bad payloads
+  - `RateLimiter` atomic check+enqueue so concurrent bursts never exceed the limit
+  - `BuildRelativeUri` percent-encodes path segments (space, `&`, unicode) while preserving `%XX` escapes
+  - User cancellation is never wrapped into `VtNetworkException` (stream/raw paths)
 
 ### Changed
-- Facade `VirusTotal` realigned to Genbox-style with all 18 module clients exposed
-- FileClient.ScanFileAsync fixed multipart upload on redirect/retry (content factory pattern)
-- FeedbackClient body type fixed from plural to singular (`comment` vs `comments`)
-- VtClient.DeserializeResponse fixed for 204 NoContent / empty body handling
-- RateLimiter clock injection per-instance (no more static clock race conditions)
-- BuildRelativeUri now percent-encodes path segments, preserves %XX escapes
+- Interactive documentation: README links to `CHANGELOG.md` and `MIGRATING_FROM_V2.md`
 
 ### Fixed
-- Multipart upload content disposal on 307 redirect + retry (content factory pattern)
-- Vote idempotency: duplicate "harmless" vote handled gracefully
-- EICAR false positive in Windows Defender during integration tests
-- DNS transient failures during integration test runs
+- 204 NoContent / 304 responses deserialize into an empty envelope instead of crashing
+- `GetStreamAsync`/`GetRawAsync` cleanly propagate `OperationCanceledException` when retry is disabled
 
-### Security
-- API key only via `x-apikey` header, never in query string
-- No secrets in git history or logs
+## [0.8.1-beta] - 2026-09-15
+
+### Added
+- Integration test suite expanded from 27 to 32 tests:
+  - File states: not-yet-uploaded → 404 `NotFoundError`, in-progress analysis status, finished report with stats
+  - Upload-size boundary (4 MiB < 32 MiB direct-limit) scan
+  - "Already scanned?" check via `TryGetAsync` (known hash → success, unknown hash → `NotFound` failure)
+- 258 unit tests passing
+
+### Changed
+- `FileClient.ScanFileAsync`/`ScanLargeFileAsync`, `UrlClient.ScanUrlAsync`, `PrivateScanningClient.UploadPrivateFileAsync` use a content-factory overload so multipart bodies are rebuilt per attempt (safe across 307 redirect + retry)
+- `FeedbackClient` comment/vote body `data.type` uses singular `comment`/`vote` (matching the API) instead of plural
+- `VtClient.DeserializeResponse` treats 204/205/304 or zero-length bodies as an empty `VtResponse<T>`
+- Vote test is idempotent (duplicate "harmless" vote tolerated)
+
+### Fixed
+- Upload crash (`ObjectDisposedException` / empty body) when the API redirects (307) or a transient error retriggers `SendAsync` with a disposed `HttpContent`
+- DELETE endpoints returning 204 no longer throw `JsonException`
+- Windows Defender false positive on EICAR written to disk during integration tests (benign payload used)
+
+## [0.8.0-beta] - 2026-09-14
+
+### Added
+- `IVtClient.GetRawAsync<T>` for bare-object endpoints (recursive `data` unwrap; used by private-file upload URL and `api_usage`)
+- Feedback latest-comments endpoints: `ListLatestCommentsAsync`, `GetCommentAsync`, `DeleteCommentAsync`, `VoteCommentAsync` (+ `CommentVoteKind`)
+- `SearchAsync` `order`/`limit` (1–300)
+- Users & groups: role management (`GroupRoles`, PATCH `context_attributes` roles), `GetUserApiUsageAsync` (`ApiUsage`), membership via `/groups/{id}/relationships/users`
+- `/intelligence/ioc_stream` → `HuntingClient.GetIocStreamObjectsAsync`
+- Typed `AnalysisAttributes.Results` / `AnalysisAttributes.Files`
+- XML docs completed and enforced (CS1591 as error)
+
+### Changed
+- Facade `VirusTotal` rewritten Genbox-style: ~90 methods over all 18 module clients (split into core + `VirusTotal.V2Compat.cs` alias layer)
+- v2-compat batch groups added: `ScanUrlsAsync`, `GetUrlReportsAsync`, `RescanFilesAsync`, `GetFileReportsAsync`, `GetCommentAsync`, `CreateCommentAsync`
+- `SavedSearchClient` body fixed to `attributes.search_query` (+ description/private/tags)
+- `CollectionClient` elements fixed to `/collections/{id}/{relationship}` (files|urls|domains|ip_addresses)
+- `GraphClient` rewritten to real schema (`graph_data`/`nodes`/`links`/`private`/`position`; create requires ≥1 content)
+- `FileClient` scan gains optional `password` (encrypted ZIP)
+- `AddUserToGroupAsync` simplified to email-based membership; "full_admin" removed
+
+## [0.7.0-beta] - 2026-09-11
+
+### Added
+- Premium/private features: `FeedsClient` (per-minute + hourly bz2/tar.bz2 streams), `PrivateScanningClient`, `HuntingClient` (rulesets + notifications, livehunt), `RetrohuntClient` (jobs, abort, matching files), `UsersClient`/`GroupsClient`
+- `ReportGenerator` rewritten fully on the v3 API (batch scan → HTML report with per-engine tables, pre-signed large-file flow)
+- Typed per-engine results in `VtFileAttributes.LastAnalysisResults`
+
+### Changed
+- Relationship descriptor-first call corrected to `/relationships/{name}` (ID-only path, saves quota); cache key split with `ids/` prefix
+- `AddVoteAsync` fail-fast validation (only `harmless`/`malicious`)
+- Feed hourly path corrected to `/feeds/{type}/hourly/{time}`
 
 ## [0.6.0-beta] - 2026-09-11
 
@@ -95,7 +139,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - DNS transient handling in integration tests
 - RateLimiter static clock race condition fixed with per-instance clock
-
----
-
-**Note**: Version 0.8.0-beta published after #2 Audit API surface completion (facade realign + v2-compat alias).
