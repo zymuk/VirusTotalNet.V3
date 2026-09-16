@@ -20,7 +20,7 @@ This guide helps you migrate from **VirusTotalNet (v2/Genbox)** to **VirusTotalN
 | `GetFileReportAsync(hash)` | `FileClient.GetFileAsync(hash)` |
 | `ScanFileAsync(bytes/Stream/path)` | `FileClient.ScanFileAsync(bytes/Stream/path)` |
 | `ScanFileAsync(path)` (overload) | `FileClient.ScanFileAsync(path)` |
-| `GetFileReportAsync(FileInfo/Stream)` | `FileClient.GetFileAsync(hash)` → then `GetFileAsync` |
+| `GetFileReportAsync(FileInfo/Stream)` | `FileClient.GetFileAsync(sha256)` of the computed hash (or the `VirusTotal.GetFileReportAsync(FileInfo/Stream)` facade overload) |
 | `RescanFileAsync(hash)` | `FileClient.AnalyseFileAsync(hash)` |
 | `GetUrlReportAsync(url)` | `UrlClient.GetUrlAsync(url)` |
 | `ScanUrlAsync(url)` | `UrlClient.ScanUrlAsync(url)` |
@@ -61,8 +61,8 @@ if (report.ResponseCode == 1) {
 var options = new VirusTotalOptions { ApiKey = "your-key" };
 using var client = new VirusTotal(options);
 var file = await client.FileClient.GetFileAsync("eicar_hash");
-if (file.Data?.Attributes?.LastAnalysisStats != null) {
-    var stats = file.Data.Attributes.LastAnalysisStats;
+if (file.Attributes?.LastAnalysisStats != null) {
+    var stats = file.Attributes.LastAnalysisStats;
     Console.WriteLine($"Detected: {stats.Malicious}/{stats.Harmless + stats.Malicious + stats.Suspicious + stats.Undetected}");
 }
 ```
@@ -71,15 +71,17 @@ if (file.Data?.Attributes?.LastAnalysisStats != null) {
 ```csharp
 using var client = new VirusTotal(new VirusTotalOptions { ApiKey = "key" });
 
-// Small file (< 32 MB)
+// Small file (< 32 MB) — returns the created analysis
 var analysis = await client.FileClient.ScanFileAsync(fileBytes);
-analysis = await client.AnalysisClient.WaitForCompletionAsync(analysis.Data.Id);
-var report = await client.FileClient.GetFileAsync(analysis.Meta.FileInfo.Sha256);
+var completed = await client.AnalysisClient.WaitForCompletionAsync(analysis.Id);
 
-// Large file (> 32 MB)
-var uploadUrl = await client.FileClient.GetFileUploadUrlAsync();
-await client.FileClient.UploadFileToUrlAsync(uploadUrl, largeFileStream);
-analysis = await client.AnalysisClient.WaitForCompletionAsync(analysis.Data.Id);
+// attributes.files is keyed by SHA-256; fetch the finished report with that hash
+string sha256 = completed.Attributes!.Files!.Keys.First();
+var report = await client.FileClient.GetFileAsync(sha256);
+
+// Large file (> 32 MB) — the pre-signed upload URL is handled internally
+var largeAnalysis = await client.FileClient.ScanLargeFileAsync(largeFileStream);
+await client.AnalysisClient.WaitForCompletionAsync(largeAnalysis.Id);
 ```
 
 ### Error Handling (v3)
@@ -160,6 +162,6 @@ public class MyService {
 
 ## Need Help?
 
-- Check the [examples project](examples/) for full workflows
+- Check the [examples project](https://github.com/zymuk/VirusTotalNet.V3/tree/main/src/VirusTotalNet.V3.Examples) for full workflows
 - Open an issue on [GitHub](https://github.com/zymuk/VirusTotalNet.V3)
-- Review the [PRD.md](docs/PRD.md) for design decisions
+- Read the [README](README.md) for the full feature list
