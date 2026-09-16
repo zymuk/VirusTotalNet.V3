@@ -2,6 +2,9 @@
 
 [![NuGet](https://img.shields.io/nuget/v/VirusTotalNet.V3.svg?style=flat-square&label=nuget)](https://www.nuget.org/packages/VirusTotalNet.V3/)
 
+[![Changelog](https://img.shields.io/badge/changelog-CHANGELOG.md-blue?style=flat-square)](CHANGELOG.md)
+[![Migrating from v2](https://img.shields.io/badge/migrate-MIGRATING_FROM_V2.md-orange?style=flat-square)](MIGRATING_FROM_V2.md)
+
 ### Features
 
 * Fully asynchronous; zero external dependencies (`net8.0` trimmable/AOT-compatible + `netstandard2.0`)
