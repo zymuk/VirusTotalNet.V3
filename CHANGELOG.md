@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-16
+
+### Fixed
+- NuGet packages now include `CHANGELOG.md` and `MIGRATING_FROM_V2.md`
+
 ## [1.0.0] - 2026-09-16
 
 First stable release, published to NuGet.

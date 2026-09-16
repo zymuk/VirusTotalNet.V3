@@ -8,7 +8,7 @@
     <AssemblyName>VirusTotalNet.V3.DependencyInjection</AssemblyName>
     <RootNamespace>VirusTotalNet.V3.DependencyInjection</RootNamespace>
     <PackageId>VirusTotalNet.V3.DependencyInjection</PackageId>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
     <Authors>Tran T. Ngoc</Authors>
     <Description>Dependency-injection glue for VirusTotalNet.V3: AddVirusTotal extension registering the client, options and all module clients. Kept separate so the core library stays free of Microsoft.Extensions.* dependencies.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -32,6 +32,8 @@
 
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\CHANGELOG.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\MIGRATING_FROM_V2.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>
